@@ -5,6 +5,8 @@ import {
   createWalletClient,
   custom,
   http,
+  isHex,
+  numberToHex,
   type Address,
   type EIP1193Provider,
   type Hex,
@@ -91,6 +93,29 @@ export function connectWallet() {
 
 export function restoreWallet() {
   return walletConnection(false);
+}
+
+export async function sendWalletTransaction(request: {
+  account: Address;
+  to: Address;
+  data: Hex;
+  value: bigint;
+}) {
+  const result = await injectedProvider().request({
+    method: 'eth_sendTransaction',
+    params: [
+      {
+        from: request.account,
+        to: request.to,
+        data: request.data,
+        value: numberToHex(request.value),
+      },
+    ],
+  });
+  if (typeof result !== 'string' || !isHex(result) || result.length !== 66) {
+    throw new Error('Wallet returned an invalid transaction hash.');
+  }
+  return result as Hex;
 }
 
 export async function getZap() {

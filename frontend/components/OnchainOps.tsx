@@ -18,6 +18,7 @@ import {
   publicClient,
   restoreWallet,
   revealPublic,
+  sendWalletTransaction,
   switchToBaseSepolia,
   type ConnectedWallet,
 } from '@/lib/chain';
@@ -497,9 +498,8 @@ export function OnchainOps() {
     }
     let hash: Hex;
     try {
-      hash = await wallet.sendTransaction({
+      hash = await sendWalletTransaction({
         account,
-        chain: wallet.chain,
         to: MUTINY_ADDRESS,
         data,
         value,
