@@ -495,21 +495,34 @@ export function OnchainOps() {
       case 'submitVote': data = encodeFunctionData({ abi: mutinyAbi, functionName: 'submitVote', args: [command.matchId, command.payload] }); break;
       case 'resolveVote': data = encodeFunctionData({ abi: mutinyAbi, functionName: 'resolveVote', args: [command.matchId] }); break;
     }
-    const [estimatedGas, gasPrice, balance] = await Promise.all([
-      publicClient.estimateGas({ account, to: MUTINY_ADDRESS, data, value }),
-      publicClient.getGasPrice(),
-      publicClient.getBalance({ address: account }),
-    ]);
+    let estimatedGas: bigint;
+    let gasPrice: bigint;
+    let balance: bigint;
+    try {
+      [estimatedGas, gasPrice, balance] = await Promise.all([
+        publicClient.estimateGas({ account, to: MUTINY_ADDRESS, data, value }),
+        publicClient.getGasPrice(),
+        publicClient.getBalance({ address: account }),
+      ]);
+    } catch (preflightError) {
+      throw new Error('TRANSACTION_PREFLIGHT_FAILED', { cause: preflightError });
+    }
     const gas = estimatedGas * 125n / 100n;
     const transactionCost = value + gas * gasPrice;
     if (balance < transactionCost) throw new Error('Insufficient funds');
-    const hash = await wallet.sendTransaction({
-      to: MUTINY_ADDRESS,
-      data,
-      value,
-      gas,
-      gasPrice,
-    });
+    let hash: Hex;
+    try {
+      hash = await wallet.sendTransaction({
+        account,
+        chain: wallet.chain,
+        to: MUTINY_ADDRESS,
+        data,
+        value,
+        gas,
+      });
+    } catch (walletError) {
+      throw new Error('WALLET_SUBMISSION_FAILED', { cause: walletError });
+    }
     setTx({ stage: 'pending', label: `${label} entering the BLACK BOX`, hash });
     play('transmission');
     let receipt: TransactionReceipt;
