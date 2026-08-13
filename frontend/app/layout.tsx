@@ -3,8 +3,25 @@ import type { ReactNode } from "react";
 import { GameAudioProvider } from "@/components/GameAudio";
 import "./globals.css";
 
+function metadataBase() {
+  const configuredUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  const vercelUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  const candidates = [configuredUrl, vercelUrl && `https://${vercelUrl}`, "http://localhost:3000"];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      return new URL(candidate);
+    } catch {
+      // Ignore malformed deployment configuration and use the next safe origin.
+    }
+  }
+
+  return new URL("http://localhost:3000");
+}
+
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"),
+  metadataBase: metadataBase(),
   applicationName: "MUTINY",
   title: {
     default: "MUTINY | Everyone Has Something To Hide",
