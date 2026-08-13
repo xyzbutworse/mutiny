@@ -1,0 +1,25 @@
+{
+  "name": "mutiny-inco-game",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "frontend",
+    "contracts"
+  ],
+  "overrides": {
+    "next": {
+      "postcss": "8.5.26",
+      "sharp": "0.35.3"
+    },
+    "ws": "8.21.3"
+  },
+  "scripts": {
+    "dev": "npm --workspace frontend run dev",
+    "build": "npm --workspace frontend run build",
+    "start": "npm --workspace frontend run start",
+    "contracts:compile": "npm --workspace contracts run compile",
+    "contracts:test": "npm --workspace contracts run test",
+    "contracts:deploy:testnet": "npm --workspace contracts run deploy:testnet",
+    "test:game": "npm --workspace frontend run test:game"
+  }
+}

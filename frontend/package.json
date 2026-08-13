@@ -1,0 +1,25 @@
+{
+  "name": "@mutiny/frontend",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test:game": "node --import tsx scripts/smoke-game.ts"
+  },
+  "dependencies": {
+    "@inco/lightning-js": "1.0.2",
+    "next": "15.5.23",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "viem": "2.39.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  }
+}

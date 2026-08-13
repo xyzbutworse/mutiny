@@ -1,0 +1,37 @@
+# MUTINY — ship checklist
+
+- [x] Core game thesis locked
+- [x] Non-generic visual system implemented
+- [x] No-wallet local playable simulation
+- [x] Five specialist roles + Saboteur identity and private incentives
+- [x] Three system crisis economy
+- [x] Saboteur claimed-repair / actual-damage mechanic
+- [x] One-use poisoned telemetry
+- [x] Imperfect investigations
+- [x] Captain audit
+- [x] Medic protection
+- [x] Sealed voting
+- [x] BLACK BOX replay
+- [x] Inco Solidity state machine written
+- [x] Client-side Inco encryption path written
+- [x] Attested private decrypt path written
+- [x] Attested public reveal path written
+- [x] Base Sepolia deployment script written
+- [x] Public onchain comms events
+- [x] Operations manual page
+- [x] 50-match simulation smoke test
+- [x] 500 randomized order-codec round trips
+- [x] Reproducible `npm run test:game` smoke command
+- [x] BLACK BOX true-vs-displayed + ballot reconstruction
+- [x] `npm install` on a networked machine
+- [x] `npm run contracts:compile`
+- [x] Fix compiler/API drift surfaced by installed current package
+- [ ] Deploy Mutiny.sol to Base Sepolia
+- [ ] Set `NEXT_PUBLIC_MUTINY_ADDRESS`
+- [ ] Run a complete real onchain 5-round match
+- [ ] Verify BLACK BOX attested reveal against deployed handles
+- [ ] Test two physical wallets in separate browsers
+- [x] Mobile layout pass
+- [ ] Deploy frontend publicly
+- [ ] Record 75-second judge demo
+- [ ] Add live URL + contract + repository to submission
