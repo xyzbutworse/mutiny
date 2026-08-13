@@ -67,8 +67,10 @@ assert(ejectedPlayerState.records[0].votes?.[ejectedPlayerState.playerSeat] === 
 const errorCases: Array<[unknown, string]> = [
   [{ code: 4001 }, "Wallet hatch closed"],
   [new Error("insufficient funds"), "Fuel reserve empty"],
+  [{ shortMessage: "Transaction failed", cause: { details: "insufficient funds for gas * price + value" } }, "Fuel reserve empty"],
   [new Error("NO_INJECTED_WALLET"), "No wallet detected"],
   [new Error("Wallet disconnected"), "Crew identity lost"],
+  [{ message: "TransactionExecutionError", cause: { code: 4902, shortMessage: "Chain mismatch" } }, "Wrong signal band"],
   [new Error("Wrong network"), "Wrong signal band"],
   [new Error("MATCH_FULL"), "Manifest sealed"],
   [new Error("ALREADY_SUBMITTED"), "Duplicate rejected"],
@@ -81,6 +83,7 @@ const errorCases: Array<[unknown, string]> = [
 for (const [error, expected] of errorCases) {
   assert(operationErrorMessage(error).includes(expected), `wrong recovery copy for ${String(error)}`);
 }
+assert(/relay code [0-9A-F]{8}/.test(operationErrorMessage(new Error("unclassified provider failure"))), "unknown wallet failure has no diagnostic code");
 
 const resumable = startSimulation();
 const savedSession = JSON.stringify({

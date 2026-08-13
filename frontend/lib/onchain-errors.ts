@@ -1,15 +1,36 @@
-function errorCode(error: unknown) {
-  if (typeof error !== "object" || error === null || !("code" in error)) return 0;
-  const code = error.code;
-  if (typeof code === "number") return code;
-  if (typeof code === "string") return Number(code);
-  return 0;
+function errorRecord(error: unknown): Record<string, unknown> | null {
+  return typeof error === "object" && error !== null ? error as Record<string, unknown> : null;
 }
 
-function errorText(error: unknown) {
-  if (error instanceof Error) return error.message;
+function errorCode(error: unknown, depth = 0): number {
+  if (depth > 5) return 0;
+  const record = errorRecord(error);
+  if (!record) return 0;
+  const code = record.code;
+  if (typeof code === "number") return code;
+  if (typeof code === "string" && Number.isFinite(Number(code))) return Number(code);
+  return errorCode(record.cause, depth + 1);
+}
+
+function errorText(error: unknown, depth = 0): string {
+  if (depth > 5) return "";
   if (typeof error === "string") return error;
-  return "";
+  const record = errorRecord(error);
+  if (!record) return "";
+  const fragments = [record.name, record.shortMessage, record.message, record.details]
+    .filter((value): value is string => typeof value === "string" && value.length > 0);
+  const cause = errorText(record.cause, depth + 1);
+  if (cause) fragments.push(cause);
+  return [...new Set(fragments)].join(" | ");
+}
+
+function diagnosticCode(message: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < message.length; index++) {
+    hash ^= message.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).toUpperCase().padStart(8, "0");
 }
 
 export function operationErrorMessage(error: unknown) {
@@ -18,7 +39,7 @@ export function operationErrorMessage(error: unknown) {
   if (code === 4001 || /rejected|denied|user cancelled/i.test(message)) {
     return "Wallet hatch closed. No order left the bridge.";
   }
-  if (/insufficient funds|exceeds balance|insufficient base sepolia eth/i.test(message)) {
+  if (/insufficient funds|exceeds balance|insufficient base sepolia eth|insufficient balance/i.test(message)) {
     return "Fuel reserve empty. Add Base Sepolia test ETH, then retry the transmission.";
   }
   if (/NO_INJECTED_WALLET|install or open an ethereum wallet/i.test(message)) {
@@ -29,6 +50,12 @@ export function operationErrorMessage(error: unknown) {
   }
   if (/wrong network|wallet returned an invalid network|chain mismatch/i.test(message)) {
     return "Wrong signal band. Tune the wallet to Base Sepolia before issuing orders.";
+  }
+  if (/nonce too low|nonce has already been used|replacement transaction underpriced/i.test(message)) {
+    return "Wallet sequence is stale. Reset the pending account activity or wait for the earlier transmission.";
+  }
+  if (/intrinsic gas too low|gas required exceeds allowance|out of gas/i.test(message)) {
+    return "Transaction fuel estimate failed. Refresh the bridge state, then retry once.";
   }
   if (/CREW_NOT_READY/i.test(message)) return "Launch lock active. Every human seat must mark ready.";
   if (/ALREADY_SEATED/i.test(message)) return "This crew identity already occupies a seat.";
@@ -53,11 +80,11 @@ export function operationErrorMessage(error: unknown) {
   if (/timeout|timed out|confirmation delayed/i.test(message)) {
     return "Transmission entered Base Sepolia, but confirmation is delayed. Check its status before sending again.";
   }
-  if (/failed to fetch|fetch failed|rpc|network request|http request|socket|503|429/i.test(message)) {
+  if (/failed to fetch|fetch failed|rpc|network request|http request|socket|resource unavailable|503|429/i.test(message)) {
     return "Base Sepolia relay is silent. Existing bridge data is preserved. Retry synchronization.";
   }
   if (/transaction reverted|execution reverted/i.test(message)) {
     return "Base Sepolia rejected the command. Synchronize the bridge before issuing a replacement.";
   }
-  return "Command lost before confirmation. Bridge state is preserved. Synchronize, then retry.";
+  return `Command lost before confirmation. Bridge state is preserved. Report relay code ${diagnosticCode(message || "UNKNOWN")}.`;
 }
