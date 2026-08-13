@@ -11,3 +11,4 @@ typechain-types
 .DS_Store
 
 *.tsbuildinfo
+.vercel
