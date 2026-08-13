@@ -21,6 +21,15 @@ import { clearTrainingSession, loadTrainingSession, saveTrainingSession, type Tr
 
 const INITIAL_ORDER: Order = { allocations: [1, 1, 1], sideAction: "NONE", target: 0 };
 
+const CREW_PORTRAITS = ["voss", "iris", "kline", "rook", "mercer"] as const;
+const CREW_QUIPS = [
+  "Relax. Systems are fine.",
+  "Happy to help fix things.",
+  "Let's keep this ship moving.",
+  "Numbers don't lie. People do.",
+  "I saw nothing.",
+] as const;
+
 type EntryStage = "MANIFEST" | "DOSSIER" | "BURN" | "BRIDGE";
 type TransitionKind = "ORDER" | "BALLOT" | "EJECTION";
 type MechanicalTransition = { kind: TransitionKind; title: string; detail: string; danger?: boolean };
@@ -65,6 +74,8 @@ export function SimulationGame() {
   const [transition, setTransition] = useState<MechanicalTransition | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const transitionTimer = useRef<number | null>(null);
+  const ballotDialog = useRef<HTMLDialogElement | null>(null);
+  const coverBlownDialog = useRef<HTMLDialogElement | null>(null);
   const interactionLocked = useRef(false);
   const audioPhase = useRef<string | null>(null);
 
@@ -115,6 +126,23 @@ export function SimulationGame() {
     setAmbience(true, Math.max(0, Math.min(1, (55 - ambienceHealth) / 45)));
   }, [ambienceHealth, ambiencePhase, play, setAmbience]);
 
+  const playerActive = game?.crew[game.playerSeat]?.active ?? true;
+  const playerIsExposedSaboteur = Boolean(game && !playerActive && game.crew[game.playerSeat]?.role === "SABOTEUR");
+
+  useEffect(() => {
+    const dialog = ballotDialog.current;
+    if (!dialog) return;
+    if (game?.phase === "VOTING" && playerActive && !dialog.open) dialog.showModal();
+    if ((game?.phase !== "VOTING" || !playerActive) && dialog.open) dialog.close();
+  }, [game?.phase, playerActive]);
+
+  useEffect(() => {
+    const dialog = coverBlownDialog.current;
+    if (!dialog) return;
+    if (playerIsExposedSaboteur && !dialog.open) dialog.showModal();
+    if (!playerIsExposedSaboteur && dialog.open) dialog.close();
+  }, [playerIsExposedSaboteur]);
+
   if (!game) {
     return (
       <section className="bridge-initializing">
@@ -138,6 +166,7 @@ export function SimulationGame() {
     : SYSTEM_NAMES.map((name, index) => ({ value: index, label: name }));
 
   function adjustAllocation(index: number, delta: number) {
+    if (!player.active) return;
     play("relay");
     setOrder((current) => {
       const next = [...current.allocations] as [number, number, number];
@@ -147,6 +176,7 @@ export function SimulationGame() {
   }
 
   function chooseSideAction(sideAction: SideAction) {
+    if (!player.active) return;
     play("relay");
     setOrder((current) => ({ ...current, sideAction, target: 0 }));
   }
@@ -160,7 +190,9 @@ export function SimulationGame() {
       const next = resolveOrders(game, order);
       setGame(next);
       play("seal-order");
-      setTransition({ kind: "ORDER", title: "ORDERS SEALED", detail: "Cipher accepted. Resolving claimed contribution against canonical effect." });
+      setTransition(player.active
+        ? { kind: "ORDER", title: "ORDERS SEALED", detail: "Cipher accepted. Resolving claimed contribution against canonical effect." }
+        : { kind: "ORDER", title: "CREW ORDERS RESOLVED", detail: "Observer feed received. Your ejected seat submitted no energy." });
       transitionTimer.current = window.setTimeout(() => {
         setTransition(null);
         interactionLocked.current = false;
@@ -176,7 +208,7 @@ export function SimulationGame() {
   }
 
   function beginVote() {
-    if (!game || interactionLocked.current) return;
+    if (!game || !player.active || interactionLocked.current) return;
     interactionLocked.current = true;
     const next = openVoting(game);
     setGame(next);
@@ -191,7 +223,7 @@ export function SimulationGame() {
   }
 
   function sealVote() {
-    if (!game || interactionLocked.current) return;
+    if (!game || !player.active || interactionLocked.current) return;
     interactionLocked.current = true;
 
     const next = resolveVoting(game, vote);
@@ -211,6 +243,28 @@ export function SimulationGame() {
       interactionLocked.current = false;
       returnToBridgeTop();
     }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 30 : 1150);
+  }
+
+  function watchVote() {
+    if (!game || player.active || interactionLocked.current) return;
+    interactionLocked.current = true;
+    const next = resolveVoting(game.phase === "DISCUSSION" ? openVoting(game) : game, 5);
+    setGame(next);
+    const record = next.records[next.records.length - 1];
+    const result = record?.ejected === null || record?.ejected === undefined
+      ? { title: "NO EJECTION", detail: "The crew reached no majority." }
+      : { title: `${next.crew[record.ejected].callsign} EJECTED`, detail: "You observed the sealed result. Your ballot was not counted." };
+    setTransition({ kind: "EJECTION", ...result, danger: record?.ejected !== null && record?.ejected !== undefined });
+    play("ballot");
+    if (record?.ejected !== null && record?.ejected !== undefined) play("ejection");
+    transitionTimer.current = window.setTimeout(() => {
+      setOrder(INITIAL_ORDER);
+      setSelectedCrew(0);
+      setVote(5);
+      setTransition(null);
+      interactionLocked.current = false;
+      returnToBridgeTop();
+    }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 30 : 900);
   }
 
   function restart() {
@@ -307,6 +361,22 @@ export function SimulationGame() {
     );
   }
 
+  if (playerIsExposedSaboteur) {
+    return (
+      <section className="cover-blown-stage">
+        <dialog ref={coverBlownDialog} className="cover-blown-modal" aria-labelledby="cover-blown-title" onCancel={(event) => event.preventDefault()}>
+          <div className="cover-blown-register"><span>HOSTILE DIRECTIVE / EXPOSED</span><b>IDENTITY COMPROMISED</b></div>
+          <div className="cover-blown-copy">
+            <span>THE CREW FOUND YOU.</span>
+            <h2 id="cover-blown-title">COVER<br />BLOWN.</h2>
+            <p>Your sabotage ends here. Return with a new role and a new lie.</p>
+          </div>
+          <button type="button" onClick={restart}>PLAY AGAIN <span>NEW IDENTITY ↗</span></button>
+        </dialog>
+      </section>
+    );
+  }
+
   if (game.phase === "FINISHED") {
     const evidence: BlackBoxEvidence = {
       winner: game.winner ?? "CREW",
@@ -388,10 +458,11 @@ export function SimulationGame() {
             {game.crew.map((member) => (
               <button type="button" key={member.seat} className={`crew-entry ${selectedCrew === member.seat ? "selected" : ""} ${!member.active ? "inactive" : ""}`} onClick={() => setSelectedCrew(member.seat)}>
                 <span className="crew-number">{String(member.seat + 1).padStart(2, "0")}</span>
-                <span className="crew-sigil">{member.callsign.slice(0, 1)}</span>
+                <span className="crew-portrait-frame"><img src={`/crew/${CREW_PORTRAITS[member.seat]}.png`} alt="" /></span>
                 <span className="crew-ident"><b>{member.callsign}</b><small>{member.seat === game.playerSeat ? "YOU / CLR 04" : "IDENTITY SEALED"}</small></span>
                 <span className="trust-meter"><i style={{ width: `${Math.max(6, member.suspicion)}%` }} /></span>
                 <span className="trust-number">{member.suspicion.toString().padStart(2, "0")}</span>
+                <span className="crew-quips">{CREW_QUIPS[member.seat]}</span>
               </button>
             ))}
           </div>
@@ -417,16 +488,18 @@ export function SimulationGame() {
           <div className="command-deck">
             {game.phase === "ACTION" && (
               <>
-                <FirstOperationBriefing stage="ACTION" />
+                {player.active ? <FirstOperationBriefing stage="ACTION" /> : null}
+                {player.active ? <>
                 <div className="command-title-row">
-                  <div><span className="micro-kicker">PRIVATE ORDER PHASE</span><h2>Seal your orders.</h2></div>
+                  <div><span className="micro-kicker">YOUR MOVE</span><h2>Choose where power goes.</h2></div>
                   <div className="energy-reserve"><span>ENERGY RESERVE</span><div>{tokens(Math.max(0, 3 - used))}</div><b>{Math.max(0, 3 - used)} REMAIN</b></div>
                 </div>
 
                 <div className="allocation-console">
                   {SYSTEM_NAMES.map((name, index) => (
                     <div className={`allocation-channel ${healthClass(game.displayHealth[index])}`} key={name}>
-                      <div className="allocation-label"><span>SYS / 0{index + 1}</span><b>{name}</b><small>ORDER CLASSIFIED</small></div>
+                      <div className="allocation-label"><span>SYS / 0{index + 1}</span><b>{name}</b></div>
+                      <div className="allocation-bay" aria-hidden="true"><i /><i /><i /></div>
                       <button type="button" className="allocation-step down" aria-label={`Remove energy from ${name}`} onClick={() => adjustAllocation(index, -1)}>−</button>
                       <div className="energy-chits" aria-label={`${order.allocations[index]} energy allocated`}>{tokens(order.allocations[index])}</div>
                       <strong className="allocation-value">{order.allocations[index]}</strong>
@@ -434,12 +507,12 @@ export function SimulationGame() {
                     </div>
                   ))}
                 </div>
-                <div className="allocation-privacy-note"><span>PUBLIC AFTER RESOLUTION</span><b>AGGREGATE SYSTEM CLAIMS</b><span>SEALED UNTIL BLACK BOX</span><b>WHO HELPED / WHO HARMED</b></div>
+                <div className="allocation-privacy-note"><span>CREW SEES</span><b>YOUR CLAIM</b><span>BLACK BOX SEES</span><b>YOUR TRUE EFFECT</b></div>
 
                 <div className="order-options">
-                  <button type="button" className={order.sideAction === "NONE" ? "selected" : ""} onClick={() => chooseSideAction("NONE")}><span>00</span><b>FULL ALLOCATION</b><small>Commit power only. Leave no investigative footprint.</small></button>
-                  <button type="button" className={order.sideAction === "INVESTIGATE" ? "selected" : ""} onClick={() => chooseSideAction("INVESTIGATE")}><span>01</span><b>INVESTIGATE</b><small>Spend one energy for private evidence from the previous round.</small></button>
-                  <button type="button" className={order.sideAction === "SPECIAL" ? "selected" : ""} onClick={() => chooseSideAction("SPECIAL")}><span>02</span><b>{player.role === "SABOTEUR" ? "HOSTILE DIRECTIVE" : "ROLE PROTOCOL"}</b><small>{brief.special}</small></button>
+                  <button type="button" className={order.sideAction === "NONE" ? "selected" : ""} onClick={() => chooseSideAction("NONE")}><span>00</span><b>USE ALL POWER</b><small>No side action.</small></button>
+                  <button type="button" className={order.sideAction === "INVESTIGATE" ? "selected" : ""} onClick={() => chooseSideAction("INVESTIGATE")}><span>01</span><b>CHECK A CREWMATE</b><small>Costs 1 power.</small></button>
+                  <button type="button" className={order.sideAction === "SPECIAL" ? "selected" : ""} onClick={() => chooseSideAction("SPECIAL")}><span>02</span><b>USE ROLE POWER</b><small>{brief.special}</small></button>
                 </div>
 
                 {order.sideAction !== "NONE" && (
@@ -453,39 +526,59 @@ export function SimulationGame() {
                 {!player.active && <div className="bridge-warning">YOU WERE EJECTED. ORDERS ARE LOCKED TO ZERO. OBSERVER MODE ENABLED.</div>}
                 <button className="seal-lever" type="button" disabled={used > 3} onClick={sealOrders}>
                   <span className="lever-track"><i /></span>
-                  <span className="lever-copy"><small>{player.active ? "CLIENT-SIDE ENCRYPTION" : "OBSERVER"}</small><b>{player.active ? "ENCRYPT + SEAL ORDERS" : "RESOLVE ROUND"}</b></span>
+                  <span className="lever-copy"><small>{player.active ? "PRIVATE ORDER" : "OBSERVER"}</small><b>{player.active ? "SEAL ORDER" : "RESOLVE ROUND"}</b></span>
                   <span className="lever-code">EXEC / 0{game.round}</span>
                 </button>
+                </> : (
+                  <div className="observer-console">
+                    <span>CREW STATUS / EJECTED</span>
+                    <h2>You are off the ship.</h2>
+                    <p>No power. No role ability. No vote. You can watch the operation unfold.</p>
+                    <button type="button" onClick={sealOrders}>WATCH CREW ORDERS <b>ROUND {String(game.round).padStart(2, "0")} ↗</b></button>
+                  </div>
+                )}
               </>
             )}
 
             {game.phase === "DISCUSSION" && (
               <div className="comms-phase">
                 <FirstOperationBriefing stage="DISCUSSION" />
-                <div className="comms-heading"><span>COMMS CHANNEL / OPEN</span><b>THE NUMBERS DON&apos;T ADD UP.</b></div>
-                <p>The board reveals aggregate outcomes only. Individual allocations, motives and role actions remain sealed. Decide whether the evidence is enough to remove someone from the ship.</p>
+                <div className="comms-heading"><span>COMMS OPEN</span><b>WHO LIED?</b></div>
+                <p>Compare claims with what happened to the ship.</p>
                 <div className="comms-prompts">
-                  <blockquote>“Who said they covered Life Support?”</blockquote>
-                  <blockquote>“Why did Reactor fall after nine claimed energy?”</blockquote>
-                  <blockquote>“A clean investigation only covers one round.”</blockquote>
+                  <blockquote>“Who covered Life Support?”</blockquote>
+                  <blockquote>“Why did Reactor drop?”</blockquote>
+                  <blockquote>“Show us your evidence.”</blockquote>
                 </div>
-                <button type="button" className="open-ballot" onClick={beginVote}>CLOSE COMMS / OPEN SEALED BALLOT <span>→</span></button>
+                {player.active
+                  ? <button type="button" className="open-ballot" onClick={beginVote}>VOTE WHO LEAVES <span>→</span></button>
+                  : <button type="button" className="open-ballot observer-vote" onClick={watchVote}>WATCH CREW VOTE <span>→</span></button>}
               </div>
             )}
 
-            {game.phase === "VOTING" && (
-              <div className="ballot-phase">
+            {game.phase === "VOTING" && player.active && (
+              <dialog ref={ballotDialog} className="ballot-modal" aria-labelledby="ballot-title" onCancel={(event) => event.preventDefault()}>
+                <div className="ballot-phase">
                 <FirstOperationBriefing stage="VOTING" />
-                <div className="ballot-heading"><span>EJECTION PROTOCOL / SEALED</span><h2>Choose who leaves the ship.</h2><p>Three votes eject. Individual ballots remain encrypted until BLACK BOX.</p></div>
+                <div className="ballot-heading"><span>SECRET VOTE</span><h2 id="ballot-title">Who leaves?</h2><p>Three matching votes eject. Nobody sees your choice.</p></div>
                 <div className="ballot-crew">
                   {game.crew.filter((c) => c.active && c.seat !== game.playerSeat).map((member) => (
                     <button type="button" key={member.seat} className={vote === member.seat ? "selected" : ""} onClick={() => { play("relay"); setVote(member.seat); }}>
-                      <span>{String(member.seat + 1).padStart(2, "0")}</span><b>{member.callsign}</b><small>SUSPICION / {member.suspicion}%</small><i />
+                      <span className="ballot-portrait"><img src={`/crew/${CREW_PORTRAITS[member.seat]}.png`} alt="" /></span><b>{member.callsign}</b><small>SUSPICION / {member.suspicion}%</small><i />
                     </button>
                   ))}
-                  <button type="button" className={`retain ${vote === 5 ? "selected" : ""}`} onClick={() => { play("relay"); setVote(5); }}><span>00</span><b>RETAIN ALL CREW</b><small>NO EJECTION THIS ROUND</small><i /></button>
+                  <button type="button" className={`retain ${vote === 5 ? "selected" : ""}`} onClick={() => { play("relay"); setVote(5); }}><span>00</span><b>KEEP EVERYONE</b><small>SKIP EJECTION</small><i /></button>
                 </div>
-                <button className="seal-ballot" type="button" onClick={sealVote}>ENCRYPT + SEAL BALLOT <span>→</span></button>
+                <button className="seal-ballot" type="button" onClick={sealVote}>SEAL EJECTION BALLOT <span>→</span></button>
+                </div>
+              </dialog>
+            )}
+            {game.phase === "VOTING" && !player.active && (
+              <div className="observer-console voting-observer">
+                <span>BALLOT STATUS / LOCKED</span>
+                <h2>Your vote no longer counts.</h2>
+                <p>The remaining crew will decide who leaves.</p>
+                <button type="button" onClick={watchVote}>WATCH VOTE RESULT <b>SEALED COUNT ↗</b></button>
               </div>
             )}
           </div>

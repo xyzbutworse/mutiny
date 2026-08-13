@@ -153,7 +153,12 @@ export function BlackBoxArchive({ evidence, onRestart }: BlackBoxArchiveProps) {
         <div className="archive-case-line"><span>BLACKWATER–7 / FLIGHT RECORD</span><span>{evidence.proofLabel}</span></div>
         <div className="archive-title-lockup">
           <h1>BLACK BOX<br /><em>DECLASSIFIED.</em></h1>
-          <div className="archive-final-stamp"><span>FINAL VERDICT</span><b>{evidence.winner} VICTORY</b><small>{evidence.finalCondition}</small></div>
+          <div className="archive-final-stamp">
+            <span>FINAL VERDICT</span>
+            <b>{evidence.winner} VICTORY</b>
+            <small>{evidence.finalCondition}</small>
+            {onRestart && <button type="button" className="archive-restart-top" onClick={() => { play("relay"); onRestart(); }}>PLAY AGAIN <i>↗</i></button>}
+          </div>
         </div>
         <div className="archive-proof-strip">
           <div><span>SEALED ROUNDS</span><b>{evidence.rounds.length}</b></div>

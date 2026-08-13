@@ -17,6 +17,8 @@ export const BASE_SEPOLIA_RPC =
   process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL || 'https://sepolia.base.org';
 export const BASE_SEPOLIA = baseSepolia;
 export const BASE_SEPOLIA_CHAIN_ID = baseSepolia.id;
+export const INCO_EXECUTOR_ADDRESS =
+  '0x4b9911b0191B0b6a6eA8F2Ed562e20Cff5AC8624';
 
 export const publicClient = createPublicClient({
   chain: BASE_SEPOLIA,
@@ -92,7 +94,13 @@ export function restoreWallet() {
 }
 
 export async function getZap() {
-  return Lightning.baseSepoliaTestnet({ hostChainRpcUrls: [BASE_SEPOLIA_RPC] });
+  return Lightning.at(
+    {
+      executorAddress: INCO_EXECUTOR_ADDRESS,
+      chainId: BASE_SEPOLIA_CHAIN_ID,
+    },
+    { hostChainRpcUrls: [BASE_SEPOLIA_RPC] },
+  );
 }
 
 export async function getIncoFee() {

@@ -20,6 +20,8 @@
     "contracts:compile": "npm --workspace contracts run compile",
     "contracts:test": "npm --workspace contracts run test",
     "contracts:deploy:testnet": "npm --workspace contracts run deploy:testnet",
+    "contracts:verify:directive": "npm --workspace contracts run verify:directive",
+    "contracts:prove:live-match": "npm --workspace contracts run prove:live-match",
     "test:game": "npm --workspace frontend run test:game"
   }
 }

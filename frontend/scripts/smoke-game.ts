@@ -55,6 +55,15 @@ for (let i = 0; i < 500; i++) {
 const expectedRoles = ["CAPTAIN", "ENGINEER", "MEDIC", "SMUGGLER", "QUARTERMASTER", "SABOTEUR"];
 for (const role of expectedRoles) assert(observedRoles.has(role), `role never observed in smoke run: ${role}`);
 
+let ejectedPlayerState = startSimulation();
+ejectedPlayerState.crew[ejectedPlayerState.playerSeat].active = false;
+ejectedPlayerState = resolveOrders(ejectedPlayerState, { allocations: [2, 0, 0], sideAction: "SPECIAL", target: 0 });
+const ejectedRound = ejectedPlayerState.records[0];
+assert(!ejectedRound.actors.some((actor) => actor.seat === ejectedPlayerState.playerSeat), "ejected player submitted an energy order");
+ejectedPlayerState = openVoting(ejectedPlayerState);
+ejectedPlayerState = resolveVoting(ejectedPlayerState, 2);
+assert(ejectedPlayerState.records[0].votes?.[ejectedPlayerState.playerSeat] === 5, "ejected player cast an ejection ballot");
+
 const errorCases: Array<[unknown, string]> = [
   [{ code: 4001 }, "Wallet hatch closed"],
   [new Error("insufficient funds"), "Fuel reserve empty"],

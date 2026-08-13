@@ -1,7 +1,7 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 
-const INCO = "0x168FDc3Ae19A5d5b03614578C58974FF30FCBe92";
+const INCO = "0x4b9911b0191B0b6a6eA8F2Ed562e20Cff5AC8624";
 const FEE = 100_000_000_000_000n;
 const encrypted = (value: bigint) =>
   ethers.AbiCoder.defaultAbiCoder().encode(["bytes32", "bytes"], [ethers.ZeroHash, ethers.AbiCoder.defaultAbiCoder().encode(["uint256"], [value])]);

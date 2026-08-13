@@ -26,8 +26,8 @@
 - [x] `npm install` on a networked machine
 - [x] `npm run contracts:compile`
 - [x] Fix compiler/API drift surfaced by installed current package
-- [ ] Deploy Mutiny.sol to Base Sepolia
-- [ ] Set `NEXT_PUBLIC_MUTINY_ADDRESS`
+- [x] Deploy Mutiny.sol to Base Sepolia at `0x4A13c85BEC1B460f0DFCDD12074c55E034522eA0`
+- [x] Set `NEXT_PUBLIC_MUTINY_ADDRESS`
 - [ ] Run a complete real onchain 5-round match
 - [ ] Verify BLACK BOX attested reveal against deployed handles
 - [ ] Test two physical wallets in separate browsers

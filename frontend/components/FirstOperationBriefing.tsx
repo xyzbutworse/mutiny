@@ -7,54 +7,30 @@ type BriefingStage = "MANIFEST" | "LOBBY" | "DOSSIER" | "ACTION" | "DISCUSSION" 
 
 const COMPLETE_KEY = "mutiny:first-operation-briefed";
 
-const BRIEFINGS: Record<Exclude<BriefingStage, "FINISHED">, { title: string; points: string[] }> = {
+const BRIEFINGS: Record<Exclude<BriefingStage, "FINISHED">, { title: string; detail: string }> = {
   MANIFEST: {
-    title: "Survive five rounds. Find the hostile directive.",
-    points: [
-      "Keep all three ship systems alive through extraction.",
-      "Claims become public. Actual effects remain sealed until BLACK BOX.",
-      "Every role has a private motive, so suspicious behavior is not proof.",
-    ],
+    title: "Keep the ship alive for five rounds.",
+    detail: "One crewmate is secretly causing damage.",
   },
   LOBBY: {
-    title: "Five seats. One encrypted Saboteur.",
-    points: [
-      "The crew wins by keeping the ship alive for five rounds.",
-      "One hostile repair secretly becomes damage.",
-      "Private objectives give loyal crew reasons to conceal their intent.",
-    ],
+    title: "Five seats. One Saboteur.",
+    detail: "Fill empty seats with bots, then start.",
   },
   DOSSIER: {
-    title: "Your directive explains your incentives.",
-    points: [
-      "Other crew received different private objectives.",
-      "You decide what to reveal during COMMS.",
-      "A strange order can serve the crew, a private objective, or sabotage.",
-    ],
+    title: "This is your secret.",
+    detail: "Play your role. Share only what helps you.",
   },
   ACTION: {
-    title: "Your order is sealed. Your claim is not.",
-    points: [
-      "Spend no more than three energy, including a side action.",
-      "The bridge reports aggregate claims, never individual effects.",
-      "Compare statements with system movement before trusting anyone.",
-    ],
+    title: "Spend 3 power. Keep your split secret.",
+    detail: "The crew sees your claim, not your true effect.",
   },
   DISCUSSION: {
-    title: "COMMS is evidence under pressure.",
-    points: [
-      "Ask who claimed each system and what changed afterward.",
-      "Investigations are imperfect. An anomaly does not reveal motive.",
-      "You choose what private evidence to disclose or withhold.",
-    ],
+    title: "Talk. Compare claims. Pick a suspect.",
+    detail: "A strange move is suspicious, not proof.",
   },
   VOTING: {
-    title: "Three matching ballots remove a crew member.",
-    points: [
-      "Ballots stay confidential until the match ends.",
-      "A correct ejection removes sabotage from later rounds.",
-      "A wrong ejection removes future repair and role abilities.",
-    ],
+    title: "Three votes send someone out.",
+    detail: "Choose carefully. Votes stay secret.",
   },
 };
 
@@ -84,7 +60,7 @@ export function FirstOperationBriefing({ stage }: { stage: BriefingStage }) {
       <div className="first-brief-register"><span>FIRST OPERATION / CONTEXT</span><button type="button" onClick={dismiss}>DISMISS BRIEFINGS</button></div>
       <div className="first-brief-body">
         <b>{briefing.title}</b>
-        <ol>{briefing.points.map((point) => <li key={point}>{point}</li>)}</ol>
+        <p>{briefing.detail}</p>
       </div>
     </aside>
   );

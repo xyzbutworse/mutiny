@@ -467,7 +467,7 @@ export function roleBrief(role: Role, saboteurTarget: 0 | 2) {
   const special: Record<Exclude<Role, "SABOTEUR">, string> = {
     CAPTAIN: "AUDIT — privately read one system's true integrity.",
     ENGINEER: "OVERCLOCK — add +2 real integrity to one system.",
-    MEDIC: "LOCKOUT — protect one crew seat from this round's ejection.",
+    MEDIC: "AIRLOCK SHIELD — protect one seat. You still vote.",
     SMUGGLER: "EXTRACT — progress your private contraband objective.",
     QUARTERMASTER: "SURGE — add +1 real integrity to every system.",
   };

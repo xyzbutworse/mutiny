@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { parseEventLogs, type Address, type Hex, type TransactionReceipt } from 'viem';
+import { encodeFunctionData, parseEventLogs, type Address, type Hex, type TransactionReceipt } from 'viem';
 import { BlackwaterShip } from '@/components/BlackwaterShip';
 import { BlackBoxArchive, type ArchiveActor, type ArchivePlayer, type ArchiveTriple, type BlackBoxEvidence } from '@/components/BlackBoxArchive';
 import { FirstOperationBriefing } from '@/components/FirstOperationBriefing';
@@ -31,7 +31,7 @@ import {
   type SideAction,
 } from '@/lib/game';
 import { operationErrorMessage } from '@/lib/onchain-errors';
-import { readLocalValue, writeLocalValue } from '@/lib/storage';
+import { readLocalValue, removeLocalValue, writeLocalValue } from '@/lib/storage';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const PHASE = ['LOBBY', 'ACTION', 'DISCUSSION', 'VOTING', 'FINISHED'] as const;
@@ -44,6 +44,14 @@ const ROLE_BY_CODE: Record<number, Role> = {
   6: 'SABOTEUR',
 };
 const EMPTY_ORDER: Order = { allocations: [1, 1, 1], sideAction: 'NONE', target: 0 };
+const CREW_PORTRAITS = ['voss', 'iris', 'kline', 'rook', 'mercer'] as const;
+const CREW_QUIPS = [
+  'Relax. Systems are fine.',
+  'Happy to help fix things.',
+  "Let's keep this ship moving.",
+  "Numbers don't lie. People do.",
+  'I saw nothing.',
+] as const;
 
 type Summary = {
   host: Address;
@@ -97,6 +105,17 @@ function archiveSpecial(role: Role, target: number) {
   return `CAPTAIN AUDIT / ${SYSTEM_NAMES[target % 3]}`;
 }
 
+function healthClass(value: number) {
+  if (value < 20) return 'critical';
+  if (value < 40) return 'warning';
+  if (value > 60) return 'stable';
+  return 'nominal';
+}
+
+function tokens(value: number) {
+  return Array.from({ length: 3 }, (_, index) => <i key={index} className={index < value ? 'filled' : ''} />);
+}
+
 export function OnchainOps() {
   const { play, setAmbience } = useGameAudio();
   const configured = MUTINY_ADDRESS.toLowerCase() !== ZERO_ADDRESS;
@@ -126,6 +145,7 @@ export function OnchainOps() {
   const [revealIssue, setRevealIssue] = useState('');
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   const lastPublicRound = useRef<PublicRound | null>(null);
+  const ballotDialog = useRef<HTMLDialogElement | null>(null);
   const operationLock = useRef(false);
   const syncSequence = useRef(0);
 
@@ -140,6 +160,14 @@ export function OnchainOps() {
   const secondsLeft = Math.max(0, deadline - now);
   const playerEjected = seated && ejectedSeats.includes(seat);
   const txBusy = tx.stage === 'wallet' || tx.stage === 'pending';
+
+  useEffect(() => {
+    const dialog = ballotDialog.current;
+    if (!dialog) return;
+    const shouldOpen = summary?.phase === 3 && seated && !playerEjected;
+    if (shouldOpen && !dialog.open) dialog.showModal();
+    if (!shouldOpen && dialog.open) dialog.close();
+  }, [playerEjected, seated, summary?.phase]);
 
   useEffect(() => () => setAmbience(false), [setAmbience]);
 
@@ -304,6 +332,7 @@ export function OnchainOps() {
     const saved = readLocalValue('mutiny:last-match');
     const initial = query?.replace(/\D/g, '') || saved?.replace(/\D/g, '') || '';
     if (initial) setMatchCode(initial);
+    if (readLocalValue('mutiny:wallet-disconnected') === 'true') return;
     void restoreWallet().then((connection) => {
       if (!connection) return;
       setWallet(connection.wallet);
@@ -321,6 +350,7 @@ export function OnchainOps() {
       if (typeof next !== 'string') {
         setWallet(null); setAccount(null); setSeat(null); clearPrivateState(); setError('Crew identity lost. The operation code remains stored for reconnection.');
       } else {
+        if (readLocalValue('mutiny:wallet-disconnected') === 'true') return;
         void restoreWallet().then((connection) => {
           if (!connection) return;
           setWallet(connection.wallet); setAccount(connection.account); setChainId(connection.chainId); clearPrivateState();
@@ -372,10 +402,41 @@ export function OnchainOps() {
       setError(''); setTx({ stage: 'wallet', label: 'Opening crew identification' });
       play('relay');
       const connection = await connectWallet();
+      removeLocalValue('mutiny:wallet-disconnected');
       setWallet(connection.wallet); setAccount(connection.account); setChainId(connection.chainId);
       setTx({ stage: 'confirmed', label: 'Crew identity confirmed' });
       if (matchCode) await syncMatch({ code: matchCode });
     }, 'Crew identification paused');
+  }
+
+  async function disconnectWallet() {
+    if (txBusy) return;
+    operationLock.current = true;
+    try {
+      const provider = window.ethereum;
+      if (provider) {
+        try {
+          await provider.request({
+            method: 'wallet_revokePermissions',
+            params: [{ eth_accounts: {} }],
+          });
+        } catch {
+          // Some injected wallets do not support programmatic permission revocation.
+        }
+      }
+      writeLocalValue('mutiny:wallet-disconnected', 'true');
+      setWallet(null);
+      setAccount(null);
+      setChainId(null);
+      setSeat(null);
+      clearPrivateState();
+      setError('');
+      setNotice('Crew identity disconnected. Operation code preserved for observation or later reconnection.');
+      setTx({ stage: 'idle', label: 'Crew identity disconnected' });
+      play('relay');
+    } finally {
+      operationLock.current = false;
+    }
   }
 
   async function switchNetwork() {
@@ -391,24 +452,35 @@ export function OnchainOps() {
     if (!wallet || !account) throw new Error('Wallet disconnected');
     if (!onBase) throw new Error('Wrong network');
     const value = 'value' in command ? command.value : 0n;
-    if (value > 0n) {
-      const balance = await publicClient.getBalance({ address: account });
-      if (balance <= value) throw new Error('Insufficient funds');
-    }
     setError(''); setNotice(''); setTx({ stage: 'wallet', label: `Authorize ${label}` });
-    let hash: Hex;
+    let data: Hex;
     switch (command.name) {
-      case 'createMatch': hash = await wallet.writeContract({ address: MUTINY_ADDRESS, abi: mutinyAbi, functionName: 'createMatch' }); break;
-      case 'joinMatch': hash = await wallet.writeContract({ address: MUTINY_ADDRESS, abi: mutinyAbi, functionName: 'joinMatch', args: [command.matchId] }); break;
-      case 'setReady': hash = await wallet.writeContract({ address: MUTINY_ADDRESS, abi: mutinyAbi, functionName: 'setReady', args: [command.matchId, command.ready] }); break;
-      case 'startMatch': hash = await wallet.writeContract({ address: MUTINY_ADDRESS, abi: mutinyAbi, functionName: 'startMatch', args: [command.matchId], value: command.value }); break;
-      case 'submitOrders': hash = await wallet.writeContract({ address: MUTINY_ADDRESS, abi: mutinyAbi, functionName: 'submitOrders', args: [command.matchId, command.payload], value: command.value }); break;
-      case 'resolveRound': hash = await wallet.writeContract({ address: MUTINY_ADDRESS, abi: mutinyAbi, functionName: 'resolveRound', args: [command.matchId] }); break;
-      case 'sendComms': hash = await wallet.writeContract({ address: MUTINY_ADDRESS, abi: mutinyAbi, functionName: 'sendComms', args: [command.matchId, command.message] }); break;
-      case 'openVote': hash = await wallet.writeContract({ address: MUTINY_ADDRESS, abi: mutinyAbi, functionName: 'openVote', args: [command.matchId] }); break;
-      case 'submitVote': hash = await wallet.writeContract({ address: MUTINY_ADDRESS, abi: mutinyAbi, functionName: 'submitVote', args: [command.matchId, command.payload], value: command.value }); break;
-      case 'resolveVote': hash = await wallet.writeContract({ address: MUTINY_ADDRESS, abi: mutinyAbi, functionName: 'resolveVote', args: [command.matchId] }); break;
+      case 'createMatch': data = encodeFunctionData({ abi: mutinyAbi, functionName: 'createMatch' }); break;
+      case 'joinMatch': data = encodeFunctionData({ abi: mutinyAbi, functionName: 'joinMatch', args: [command.matchId] }); break;
+      case 'setReady': data = encodeFunctionData({ abi: mutinyAbi, functionName: 'setReady', args: [command.matchId, command.ready] }); break;
+      case 'startMatch': data = encodeFunctionData({ abi: mutinyAbi, functionName: 'startMatch', args: [command.matchId] }); break;
+      case 'submitOrders': data = encodeFunctionData({ abi: mutinyAbi, functionName: 'submitOrders', args: [command.matchId, command.payload] }); break;
+      case 'resolveRound': data = encodeFunctionData({ abi: mutinyAbi, functionName: 'resolveRound', args: [command.matchId] }); break;
+      case 'sendComms': data = encodeFunctionData({ abi: mutinyAbi, functionName: 'sendComms', args: [command.matchId, command.message] }); break;
+      case 'openVote': data = encodeFunctionData({ abi: mutinyAbi, functionName: 'openVote', args: [command.matchId] }); break;
+      case 'submitVote': data = encodeFunctionData({ abi: mutinyAbi, functionName: 'submitVote', args: [command.matchId, command.payload] }); break;
+      case 'resolveVote': data = encodeFunctionData({ abi: mutinyAbi, functionName: 'resolveVote', args: [command.matchId] }); break;
     }
+    const [estimatedGas, gasPrice, balance] = await Promise.all([
+      publicClient.estimateGas({ account, to: MUTINY_ADDRESS, data, value }),
+      publicClient.getGasPrice(),
+      publicClient.getBalance({ address: account }),
+    ]);
+    const gas = estimatedGas * 125n / 100n;
+    const transactionCost = value + gas * gasPrice;
+    if (balance < transactionCost) throw new Error('Insufficient funds');
+    const hash = await wallet.sendTransaction({
+      to: MUTINY_ADDRESS,
+      data,
+      value,
+      gas,
+      gasPrice,
+    });
     setTx({ stage: 'pending', label: `${label} entering the BLACK BOX`, hash });
     play('transmission');
     let receipt: TransactionReceipt;
@@ -477,6 +549,18 @@ export function OnchainOps() {
       const code = createdId.toString(); setMatchCode(code); clearPrivateState();
       await syncMatch({ code }); setNotice(`Operation ${code} created. Share the invitation with your crew.`);
     });
+  }
+
+  async function prepareOperation() {
+    if (!account) {
+      await connect();
+      return;
+    }
+    if (!onBase) {
+      await switchNetwork();
+      return;
+    }
+    await createMatch();
   }
 
   async function joinMatch() { if (!id) return; await perform(async () => { await send({ name: 'joinMatch', matchId: id }, 'boarding'); await syncMatch(); }); }
@@ -634,77 +718,24 @@ export function OnchainOps() {
     ? [publicRound.health[0] ?? 55, publicRound.health[1] ?? 55, publicRound.health[2] ?? 55]
     : [55, 55, 55];
 
-  if (summary?.phase === 4 && blackBox) return <BlackBoxArchive evidence={blackBox} />;
+  if (summary?.phase === 4 && blackBox) return <div className="onchain-blackbox-shell">{account ? <button className="wallet-disconnect" type="button" disabled={txBusy} onClick={disconnectWallet}><span>{short(account)}</span><b>DISCONNECT</b></button> : <button className="wallet-disconnect wallet-reconnect" type="button" disabled={txBusy} onClick={connect}><span>CREW ID LOST</span><b>RECONNECT</b></button>}<BlackBoxArchive evidence={blackBox} /></div>;
 
-  return (
-    <div className="chain-shell multiplayer-shell">
-      <header className="chain-head">
-        <div><div className="kicker">LIVE OPERATION · BASE SEPOLIA</div><h1>BLACKWATER<span>–7</span></h1><p>Five seats. One hostile directive. Every decision sealed.</p></div>
-        <div className="chain-head-actions">
-          <Link href="/play" className="training-link">TRAINING SIMULATION</Link>
-          <button className="wallet-button" type="button" disabled={txBusy} onClick={connect}>{account ? short(account) : 'IDENTIFY CREW'}</button>
-        </div>
-        <div className="chain-vessel" aria-hidden="true"><BlackwaterShip health={vesselHealth} compact /></div>
-      </header>
+  const minimumHealth = Math.min(...vesselHealth);
+  const shipState = minimumHealth < 20 ? 'critical' : minimumHealth < 40 ? 'warning' : minimumHealth > 60 ? 'stable' : 'nominal';
 
-      {!configured && <div className="chain-warning"><b>LIVE OPERATION OFFLINE</b><span>This build has no deployed Base Sepolia operation address. Use the clearly labeled training simulation while the live bridge is configured.</span><Link href="/play">ENTER TRAINING</Link></div>}
-      {account && !onBase && <div className="chain-warning network-warning"><b>WRONG SIGNAL</b><span>Your crew identity is connected on another network.</span><button disabled={txBusy} onClick={switchNetwork}>TUNE TO BASE SEPOLIA</button></div>}
-      {(error || notice) && <div className={`operation-message ${error ? 'error' : 'notice'}`} role={error ? 'alert' : 'status'}><span>{error || notice}</span>{error && matchCode && !txBusy && <button type="button" onClick={() => syncMatch()}>SYNCHRONIZE BRIDGE</button>}</div>}
-      {!error && syncIssue && <div className="operation-message error" role="alert"><span>{syncIssue}</span><button type="button" disabled={txBusy} onClick={() => syncMatch()}>RETRY RELAY</button></div>}
-      {revealIssue && <div className="operation-message attestation" role="status"><span>{revealIssue}</span><button type="button" disabled={txBusy} onClick={() => syncMatch()}>RETRY ATTESTATION</button></div>}
-      <div className={`tx-status ${tx.stage}`}><i /><span>{tx.label}</span>{tx.stage === 'pending' && <b>CONFIRMING</b>}{tx.stage === 'pending' && tx.hash && <button type="button" onClick={checkPendingTransmission}>CHECK TRANSMISSION</button>}</div>
-      {!summary && <FirstOperationBriefing stage="LOBBY" />}
+  const statusLayer = <>
+    {!configured && <div className="chain-warning"><b>LIVE OPERATION OFFLINE</b><span>No deployed operation address was found.</span><Link href="/play">ENTER TRAINING</Link></div>}
+    {account && !onBase && <div className="chain-warning network-warning"><b>WRONG SIGNAL</b><span>Switch your wallet to Base Sepolia.</span><button disabled={txBusy} onClick={switchNetwork}>SWITCH NETWORK</button></div>}
+    {(error || notice) && <div className={`operation-message ${error ? 'error' : 'notice'}`} role={error ? 'alert' : 'status'}><span>{error || notice}</span>{error && matchCode && !txBusy && <button type="button" onClick={account ? () => syncMatch() : connect}>{account ? 'RETRY' : 'RECONNECT'}</button>}</div>}
+    {!error && syncIssue && <div className="operation-message error" role="alert"><span>{syncIssue}</span><button type="button" disabled={txBusy} onClick={() => syncMatch()}>RETRY RELAY</button></div>}
+    {revealIssue && <div className="operation-message attestation" role="status"><span>{revealIssue}</span><button type="button" disabled={txBusy} onClick={() => syncMatch()}>RETRY ATTESTATION</button></div>}
+    <div className={`tx-status ${tx.stage}`}><i /><span>{tx.label}</span>{tx.stage === 'pending' && <b>CONFIRMING</b>}{tx.stage === 'pending' && tx.hash && <button type="button" onClick={checkPendingTransmission}>CHECK</button>}</div>
+    {account ? <button className="wallet-disconnect" type="button" disabled={txBusy} onClick={disconnectWallet}><span>{short(account)}</span><b>DISCONNECT</b></button> : summary && <button className="wallet-disconnect wallet-reconnect" type="button" disabled={txBusy} onClick={connect}><span>CREW ID LOST</span><b>RECONNECT</b></button>}
+  </>;
 
-      {!summary ? (
-        <section className="operation-entry">
-          <div className="entry-panel"><span>NEW OPERATION</span><h2>Take command.</h2><p>Create a crew lobby, invite real wallets, then fill unclaimed stations with shipboard crew.</p><button className="primary" disabled={!configured || !account || !onBase || txBusy} onClick={createMatch}>CREATE OPERATION</button></div>
-          <div className="entry-divider">OR</div>
-          <div className="entry-panel"><span>CREW INVITATION</span><h2>Board by code.</h2><p>Paste the operation code sent by your captain.</p><input inputMode="numeric" value={matchCode} onChange={(event) => setMatchCode(event.target.value.replace(/\D/g, ''))} placeholder="OPERATION CODE" /><button disabled={!configured || !matchCode || txBusy} onClick={() => syncMatch()}>FIND OPERATION</button></div>
-        </section>
-      ) : (
-        <>
-          <section className="operation-strip">
-            <div><span>OPERATION</span><b>{matchCode}</b></div><div><span>PHASE</span><b>{PHASE[summary.phase]}</b></div><div><span>ROUND</span><b>{summary.round || 'LOBBY'} / 5</b></div><div><span>CRISIS CLOCK</span><b>{deadline ? `${secondsLeft}s` : 'STANDBY'}</b></div><button onClick={copyInvite}>COPY CREW INVITE</button>
-          </section>
+  if (!summary) return <div className="chain-shell multiplayer-shell onchain-entry-shell">{statusLayer}<section className="boarding-screen onchain-boarding"><div className="boarding-topline"><span>BLACKWATER–7 / LIVE CREW INTAKE</span><span>BASE SEPOLIA / INCO LIGHTNING</span></div><div className="boarding-copy"><span className="micro-kicker">LIVE OPERATION / 07-A</span><h1>BOARD THE<br />VESSEL.</h1><p>Connect your wallet, create a crew lobby, or enter an operation code from your captain.</p><button className="wallet-button mechanical-command" type="button" disabled={txBusy} onClick={connect}><span>{account ? short(account) : 'IDENTIFY CREW'}</span><b>BASE SEPOLIA</b><i>→</i></button></div><div className="onchain-entry-actions"><div className="entry-panel"><span>NEW OPERATION</span><h2>Take command.</h2><button className="primary create-operation-button" disabled={!configured || txBusy} onClick={prepareOperation}>{!account ? 'CONNECT WALLET TO CREATE' : !onBase ? 'SWITCH TO BASE SEPOLIA' : 'CREATE OPERATION'}</button></div><div className="entry-panel"><span>CREW INVITATION</span><h2>Board by code.</h2><input inputMode="numeric" value={matchCode} onChange={(event) => setMatchCode(event.target.value.replace(/\D/g, ''))} placeholder="OPERATION CODE" /><button disabled={!configured || !matchCode || txBusy} onClick={() => syncMatch()}>FIND OPERATION</button></div></div></section></div>;
 
-          {summary.phase === 0 && <section className="lobby-console">
-            <FirstOperationBriefing stage="LOBBY" />
-            <div className="lobby-heading"><div><span>CREW MANIFEST</span><h2>Awaiting personnel.</h2></div><p>The captain launches when every human is ready. Empty stations become autonomous crew.</p></div>
-            <div className="seat-grid">{Array.from({ length: 5 }, (_, index) => {
-              const occupied = index < summary.humanCount; const mine = seat === index;
-              return <article className={`${occupied ? 'occupied' : 'vacant'} ${mine ? 'mine' : ''}`} key={index}><span>SEAT {index + 1}</span><b>{occupied ? short(summary.players[index]) : 'OPEN STATION'}</b><small>{occupied ? ready[index] ? 'READY' : 'BOARDING' : 'BOT ON LAUNCH'}</small></article>;
-            })}</div>
-            <div className="lobby-actions">
-              {!seated && <button className="primary" disabled={!account || !onBase || txBusy || summary.humanCount >= 5} onClick={joinMatch}>{summary.humanCount >= 5 ? 'MANIFEST SEALED' : 'CLAIM OPEN SEAT'}</button>}
-              {seated && <button className={currentReady ? 'ready' : 'primary'} disabled={!onBase || txBusy} onClick={toggleReady}>{currentReady ? 'READY · STAND DOWN' : 'MARK READY'}</button>}
-              {isHost && <button disabled={!allHumansReady || !onBase || txBusy} onClick={startMatch}>LAUNCH · FILL {5 - summary.humanCount} BOT SEATS</button>}
-            </div>
-          </section>}
+  if (summary.phase === 0) return <div className="chain-shell multiplayer-shell onchain-entry-shell">{statusLayer}<section className="boarding-screen onchain-boarding"><div className="boarding-topline"><span>BLACKWATER–7 / CREW MANIFEST</span><span>OPERATION {matchCode}</span></div><div className="boarding-copy"><span className="micro-kicker">LIVE LOBBY / {summary.humanCount} HUMAN</span><h1>SEAL THE<br />MANIFEST.</h1><p>Share the operation code. Empty stations become shipboard crew when the captain launches.</p><button className="copy-live-invite" onClick={copyInvite}>COPY CREW INVITE</button></div><div className="manifest-table">{Array.from({ length: 5 }, (_, index) => { const occupied = index < summary.humanCount; return <div className="manifest-row" key={index}><span className="manifest-index">{String(index + 1).padStart(2, '0')}</span><span className="manifest-glyph"><img src={`/crew/${CREW_PORTRAITS[index]}.png`} alt="" /></span><span className="manifest-name"><b>{occupied ? short(summary.players[index]) : 'OPEN STATION'}</b><small>{occupied ? seat === index ? 'YOU / HUMAN' : 'HUMAN CREW' : 'BOT ON LAUNCH'}</small></span><span className="manifest-clearance">{occupied ? 'WALLET VERIFIED' : 'AUTONOMOUS'}</span><span className="manifest-status"><i />{occupied ? ready[index] ? 'READY' : 'BOARDING' : 'STANDBY'}</span></div>; })}</div><div className="onchain-lobby-actions">{!seated && <button disabled={!account || !onBase || txBusy || summary.humanCount >= 5} onClick={joinMatch}>CLAIM OPEN SEAT</button>}{seated && <button disabled={!onBase || txBusy} onClick={toggleReady}>{currentReady ? 'READY / STAND DOWN' : 'MARK READY'}</button>}{isHost && <button className="primary" disabled={!allHumansReady || !onBase || txBusy} onClick={startMatch}>LAUNCH / FILL {5 - summary.humanCount} BOT SEATS</button>}</div></section></div>;
 
-          {summary.phase > 0 && <div className="multiplayer-grid">
-            <aside className="crew-column"><div className="panel-title">CREW STATUS</div>{Array.from({ length: 5 }, (_, index) => <div className={`crew-status ${seat === index ? 'mine' : ''} ${ejectedSeats.includes(index) ? 'ejected' : ''}`} key={index}><span>0{index + 1}</span><b>{summary.bots[index] ? `SHIPBOARD ${index + 1}` : short(summary.players[index])}</b><small>{ejectedSeats.includes(index) ? 'EJECTED' : summary.bots[index] ? 'AUTONOMOUS' : seat === index ? 'YOU' : 'CREW'}</small></div>)}</aside>
-            <main className="operation-deck">
-              {!seated && <div className="spectator-card"><h2>Observation channel</h2><p>This wallet does not hold a seat in operation {matchCode}. Public telemetry and the final flight record remain visible.</p></div>}
-              {seated && !role && <section className="dossier-card"><span>SEALED PERSONNEL FILE</span><h2>Your directive is waiting.</h2><p>Your wallet opens only your role and objective. No other crew identity is exposed.</p><button className="primary" disabled={!wallet || !onBase || txBusy} onClick={revealRole}>OPEN EYES-ONLY FILE</button></section>}
-              {role && <section className={`dossier-card revealed ${role === 'SABOTEUR' ? 'hostile' : ''}`}><FirstOperationBriefing stage="DOSSIER" /><span>EYES ONLY · SEAT {(seat ?? 0) + 1}</span><h2>{role}</h2><p>{objectiveLabel(objectiveCode ?? 0)}</p><small>{special}</small></section>}
-
-              {summary.phase === 1 && seated && !playerEjected && <section className="phase-card"><FirstOperationBriefing stage="ACTION" /><div className="phase-heading"><div><span>ROUND {summary.round} · ACTION</span><h2>Seal your orders.</h2></div><b>{energy} / 3 ENERGY</b></div><div className="allocation-grid">{SYSTEM_NAMES.map((name, index) => <div key={name}><span>{name}</span><button disabled={orderSubmitted || txBusy} onClick={() => { play('relay'); setOrder((current) => { const allocations = [...current.allocations] as [number, number, number]; allocations[index] = Math.max(0, allocations[index] - 1); return { ...current, allocations }; }); }}>−</button><strong>{order.allocations[index]}</strong><button disabled={orderSubmitted || txBusy} onClick={() => { play('relay'); setOrder((current) => { const allocations = [...current.allocations] as [number, number, number]; allocations[index] = Math.min(3, allocations[index] + 1); return { ...current, allocations }; }); }}>+</button></div>)}</div><div className="allocation-privacy-note"><span>PUBLIC AFTER RESOLUTION</span><b>AGGREGATE SYSTEM CLAIMS</b><span>SEALED UNTIL BLACK BOX</span><b>WHO HELPED / WHO HARMED</b></div><div className="order-settings"><label>SIDE ACTION<select disabled={orderSubmitted || txBusy} value={order.sideAction} onChange={(event) => { play('relay'); setOrder({ ...order, sideAction: event.target.value as SideAction, target: 0 }); }}><option value="NONE">FULL REPAIR ALLOCATION</option><option value="INVESTIGATE">INVESTIGATE CREW</option><option value="SPECIAL">USE ROLE ABILITY</option></select></label><label>TARGET<select disabled={orderSubmitted || txBusy || order.sideAction === 'NONE'} value={order.target} onChange={(event) => { play('relay'); setOrder({ ...order, target: Number(event.target.value) }); }}>{targetOptions.map((target) => <option value={target.value} key={target.value}>{target.label}</option>)}</select></label></div><button className="primary" disabled={orderSubmitted || energy > 3 || !onBase || txBusy} onClick={submitOrders}>{orderSubmitted ? 'ORDERS SEALED' : 'SEAL ORDERS'}</button>{canResolve && <button disabled={txBusy} onClick={resolveRound}>RESOLVE SEALED ORDERS</button>} {!canResolve && orderSubmitted && <p className="waiting-copy">{secondsLeft === 0 ? 'CRISIS CLOCK EXPIRED · SYNCHRONIZING RESOLUTION CLEARANCE' : 'Waiting for remaining crew or the crisis clock.'}</p>}</section>}
-
-              {summary.phase === 2 && <section className="phase-card discussion-card"><FirstOperationBriefing stage="DISCUSSION" /><div className="phase-heading"><div><span>ROUND {summary.round} · DISCUSSION</span><h2>State your case.</h2></div><b>{secondsLeft}s</b></div><div className="comms-feed">{comms.length ? comms.map((line, index) => <p key={index}>{line}</p>) : <p>COMMS carrier open. No crew transmissions recorded.</p>}</div>{seated && !playerEjected && <div className="comms-compose"><input maxLength={180} value={commsDraft} onChange={(event) => setCommsDraft(event.target.value)} placeholder="Transmit to the crew" /><button disabled={!commsDraft.trim() || txBusy} onClick={sendMessage}>TRANSMIT</button></div>}<div className="phase-actions">{seated && !playerEjected && <button disabled={txBusy} onClick={revealIntel}>OPEN PRIVATE FIELD REPORT</button>}{(isHost || secondsLeft === 0) && <button className="primary" disabled={!account || !onBase || txBusy} onClick={openVote}>OPEN SEALED BALLOT</button>}</div></section>}
-
-              {summary.phase === 3 && seated && !playerEjected && <section className="phase-card"><FirstOperationBriefing stage="VOTING" /><div className="phase-heading"><div><span>ROUND {summary.round} · BALLOT</span><h2>Choose who stays aboard.</h2></div><b>{secondsLeft}s</b></div><div className="ballot-grid">{Array.from({ length: 5 }, (_, index) => <button className={vote === index ? 'selected' : ''} disabled={voteSubmitted || txBusy || ejectedSeats.includes(index)} onClick={() => { play('relay'); setVote(index); }} key={index}><span>SEAT {index + 1}</span><b>{summary.bots[index] ? `SHIPBOARD ${index + 1}` : short(summary.players[index])}</b></button>)}<button className={vote === 5 ? 'selected' : ''} disabled={voteSubmitted || txBusy} onClick={() => { play('relay'); setVote(5); }}><span>RETAIN</span><b>NO EJECTION</b></button></div><button className="primary" disabled={voteSubmitted || !onBase || txBusy} onClick={submitVote}>{voteSubmitted ? 'BALLOT SEALED' : 'SEAL BALLOT'}</button>{canResolve && <button disabled={txBusy} onClick={resolveVote}>REVEAL CREW VERDICT</button>} {!canResolve && voteSubmitted && <p className="waiting-copy">{secondsLeft === 0 ? 'VOTING CLOCK EXPIRED · SYNCHRONIZING VERDICT CLEARANCE' : 'Waiting for remaining ballots or the voting clock.'}</p>}</section>}
-
-              {canResolve && (!seated || playerEjected) && summary.phase === 1 && <section className="phase-card spectator-card"><h2>The sealed orders are ready.</h2><p>Any connected crew identity may advance the operation after every active order arrives or the crisis clock expires.</p><button className="primary" disabled={!account || !onBase || txBusy} onClick={resolveRound}>RESOLVE SEALED ORDERS</button></section>}
-              {canResolve && (!seated || playerEjected) && summary.phase === 3 && <section className="phase-card spectator-card"><h2>The crew verdict is ready.</h2><p>Any connected crew identity may reveal the aggregate ejection result.</p><button className="primary" disabled={!account || !onBase || txBusy} onClick={resolveVote}>REVEAL CREW VERDICT</button></section>}
-              {playerEjected && !canResolve && summary.phase === 1 && <section className="phase-card spectator-card"><span>EJECTION CONSEQUENCE</span><h2>Observer channel only.</h2><p>Your order channel is sealed to zero. The crisis clock releases any missing human slots for resolution in {secondsLeft}s.</p></section>}
-              {playerEjected && !canResolve && summary.phase === 3 && <section className="phase-card spectator-card"><span>EJECTION CONSEQUENCE</span><h2>Ballot clearance revoked.</h2><p>Your ballot no longer counts. The voting clock releases any missing human slots in {secondsLeft}s.</p></section>}
-
-              {summary.phase === 4 && <section className="dossier-card blackbox-card"><FirstOperationBriefing stage="FINISHED" /><span>RECOVERY COMPLETE</span><h2>BLACK BOX</h2><p>The operation has ended. Hidden roles, decisions, ballots, sabotage, private field reports, and poisoned readings are now public evidence.</p><button className="primary" disabled={txBusy} onClick={revealBlackBox}>{tx.stage === 'pending' ? 'DECLASSIFYING FLIGHT RECORD' : 'RECOVER FLIGHT RECORD'}</button></section>}
-            </main>
-            <aside className="telemetry-column"><div className="panel-title">PUBLIC TELEMETRY</div>{SYSTEM_NAMES.map((name, index) => <div className="system-reading" key={name}><span>{name}</span><b>{revealIssue ? '--' : `${publicRound?.health[index] ?? 55}%`}</b><i><em style={{ width: revealIssue ? '0%' : `${publicRound?.health[index] ?? 55}%` }} /></i><small>{revealIssue ? 'INCO ATTESTATION PENDING' : publicRound ? `ROUND ${publicRound.round} REPORTED` : 'INITIAL STATE'}</small></div>)}{publicRound?.ejected !== undefined && <div className="verdict-card"><span>LAST VERDICT</span><b>{publicRound.ejected === 255 ? 'NO EJECTION' : `SEAT ${publicRound.ejected + 1} EJECTED`}</b></div>}<div className="signal-card"><span>NETWORK</span><b>{syncIssue ? 'RELAY DEGRADED' : onBase ? 'BASE SEPOLIA · LIVE' : 'SIGNAL LOST'}</b><small>{syncIssue ? 'PRESERVING LAST CONFIRMED STATE' : account ? 'CREW IDENTITY ACTIVE' : 'IDENTIFY CREW TO ACT'}</small></div></aside>
-          </div>}
-        </>
-      )}
-    </div>
-  );
+  return <div className="chain-shell multiplayer-shell onchain-bridge-shell">{statusLayer}<section className={`bridge-screen ship-${shipState}`} data-ship-state={shipState}><header className="bridge-topbar"><div><span>LIVE COMMAND DECK</span><b>OPERATION {matchCode}</b></div><div className="round-indicator"><small>ROUND</small><strong>{String(summary.round).padStart(2, '0')}</strong><span>/ 05</span></div><div className="phase-indicator"><span>PHASE</span><b>{PHASE[summary.phase]}</b></div><div className="bridge-signal"><i /> {onBase ? 'BASE SEPOLIA / LIVE' : 'SIGNAL LOST'}</div></header><div className="bridge-layout"><aside className="crew-manifest-v2"><div className="section-code"><span>CREW MANIFEST</span><b>{summary.humanCount} HUMAN / {summary.botCount} BOT</b></div><div className="crew-entries">{Array.from({ length: 5 }, (_, index) => <div className={`crew-entry ${seat === index ? 'selected' : ''} ${ejectedSeats.includes(index) ? 'inactive' : ''}`} key={index}><span className="crew-number">{String(index + 1).padStart(2, '0')}</span><span className="crew-portrait-frame"><img src={`/crew/${CREW_PORTRAITS[index]}.png`} alt="" /></span><span className="crew-ident"><b>{summary.bots[index] ? `SHIPBOARD ${index + 1}` : short(summary.players[index])}</b><small>{seat === index ? 'YOU / OWNER ONLY' : summary.bots[index] ? 'AUTONOMOUS' : 'IDENTITY SEALED'}</small></span><span className="trust-meter"><i style={{ width: ejectedSeats.includes(index) ? '100%' : '18%' }} /></span><span className="trust-number">{ejectedSeats.includes(index) ? 'XX' : '18'}</span><span className="crew-quips">{ejectedSeats.includes(index) ? 'Removed from the vessel.' : CREW_QUIPS[index]}</span></div>)}</div></aside><main className="bridge-core"><div className="ship-stage"><BlackwaterShip health={vesselHealth} compact /><div className="crisis-banner"><span>PUBLIC SYSTEM FEED</span><b>{vesselHealth.join(' / ')}</b><em>REPORTED TELEMETRY MAY BE COMPROMISED</em></div></div><div className="command-deck">{!seated && <div className="observer-console"><span>PUBLIC OBSERVER / NO SEAT</span><h2>Watch the operation.</h2><p>Connect the seated wallet to issue orders. Public telemetry remains visible.</p></div>}{seated && !role && <div className="observer-console dossier-open-console"><span>SEALED PERSONNEL FILE</span><h2>Your directive is waiting.</h2><p>Your wallet opens only your role and objective.</p><button disabled={!wallet || !onBase || txBusy} onClick={revealRole}>OPEN EYES-ONLY FILE <b>OWNER ONLY ↗</b></button></div>}{summary.phase === 1 && seated && role && !playerEjected && <><FirstOperationBriefing stage="ACTION" /><div className="command-title-row"><div><span className="micro-kicker">YOUR MOVE / {role}</span><h2>Choose where power goes.</h2></div><div className="energy-reserve"><span>ENERGY RESERVE</span><div>{tokens(Math.max(0, 3 - energy))}</div><b>{Math.max(0, 3 - energy)} REMAIN</b></div></div><div className="allocation-console">{SYSTEM_NAMES.map((name, index) => <div className={`allocation-channel ${healthClass(vesselHealth[index])}`} key={name}><div className="allocation-label"><span>SYS / 0{index + 1}</span><b>{name}</b></div><div className="allocation-bay" aria-hidden="true"><i /><i /><i /></div><button className="allocation-step down" disabled={orderSubmitted || txBusy} onClick={() => setOrder((current) => { const allocations = [...current.allocations] as [number, number, number]; allocations[index] = Math.max(0, allocations[index] - 1); return { ...current, allocations }; })}>−</button><div className="energy-chits">{tokens(order.allocations[index])}</div><strong className="allocation-value">{order.allocations[index]}</strong><button className="allocation-step up" disabled={orderSubmitted || txBusy} onClick={() => setOrder((current) => { const allocations = [...current.allocations] as [number, number, number]; allocations[index] = Math.min(3, allocations[index] + 1); return { ...current, allocations }; })}>+</button></div>)}</div><div className="allocation-privacy-note"><span>CREW SEES</span><b>YOUR CLAIM</b><span>BLACK BOX SEES</span><b>YOUR TRUE EFFECT</b></div><div className="order-options">{(['NONE', 'INVESTIGATE', 'SPECIAL'] as SideAction[]).map((action, index) => <button key={action} className={order.sideAction === action ? 'selected' : ''} disabled={orderSubmitted || txBusy} onClick={() => setOrder({ ...order, sideAction: action, target: 0 })}><span>0{index}</span><b>{action === 'NONE' ? 'USE ALL POWER' : action === 'INVESTIGATE' ? 'CHECK A CREWMATE' : 'USE ROLE POWER'}</b><small>{action === 'SPECIAL' ? special : action === 'INVESTIGATE' ? 'Costs 1 power.' : 'No side action.'}</small></button>)}</div>{order.sideAction !== 'NONE' && <div className="sealed-target-row"><label><span>TARGET</span><select disabled={orderSubmitted || txBusy} value={order.target} onChange={(event) => setOrder({ ...order, target: Number(event.target.value) })}>{targetOptions.map((target) => <option value={target.value} key={target.value}>{target.label}</option>)}</select></label><div><span>VISIBILITY</span><b>OWNER ONLY</b></div></div>}<button className="seal-lever" disabled={orderSubmitted || energy > 3 || !onBase || txBusy} onClick={submitOrders}><span className="lever-track"><i /></span><span className="lever-copy"><small>ENCRYPTED ORDER</small><b>{orderSubmitted ? 'ORDERS SEALED' : 'SEAL ORDER'}</b></span><span className="lever-code">EXEC / 0{summary.round}</span></button>{canResolve && <button className="onchain-resolve" disabled={txBusy} onClick={resolveRound}>RESOLVE CREW ORDERS</button>}</>}{summary.phase === 2 && <div className="comms-phase"><FirstOperationBriefing stage="DISCUSSION" /><div className="comms-heading"><span>COMMS OPEN / {secondsLeft}s</span><b>WHO LIED?</b></div><div className="comms-feed">{comms.length ? comms.map((line, index) => <p key={index}>{line}</p>) : <p>No crew transmissions yet.</p>}</div>{seated && !playerEjected && <div className="comms-compose"><input maxLength={180} value={commsDraft} onChange={(event) => setCommsDraft(event.target.value)} placeholder="Transmit to the crew" /><button disabled={!commsDraft.trim() || txBusy} onClick={sendMessage}>TRANSMIT</button></div>}<div className="phase-actions">{seated && !playerEjected && <button disabled={txBusy} onClick={revealIntel}>OPEN PRIVATE REPORT</button>}{(isHost || secondsLeft === 0) && <button className="open-ballot" disabled={!account || !onBase || txBusy} onClick={openVote}>VOTE WHO LEAVES <span>→</span></button>}</div></div>}{summary.phase === 3 && seated && !playerEjected && <dialog ref={ballotDialog} className="ballot-modal" aria-labelledby="live-ballot-title" onCancel={(event) => event.preventDefault()}><div className="ballot-phase"><div className="ballot-heading"><span>SECRET VOTE / BASE SEPOLIA</span><h2 id="live-ballot-title">Who leaves?</h2><p>Nobody sees your encrypted choice.</p></div><div className="ballot-crew">{Array.from({ length: 5 }, (_, index) => <button className={vote === index ? 'selected' : ''} disabled={voteSubmitted || txBusy || ejectedSeats.includes(index)} onClick={() => setVote(index)} key={index}><span className="ballot-portrait"><img src={`/crew/${CREW_PORTRAITS[index]}.png`} alt="" /></span><b>{summary.bots[index] ? `SHIPBOARD ${index + 1}` : short(summary.players[index])}</b><small>SEAT {index + 1}</small><i /></button>)}<button className={`retain ${vote === 5 ? 'selected' : ''}`} disabled={voteSubmitted || txBusy} onClick={() => setVote(5)}><span>00</span><b>KEEP EVERYONE</b><small>SKIP EJECTION</small><i /></button></div><button className="seal-ballot" disabled={voteSubmitted || !onBase || txBusy} onClick={submitVote}>{voteSubmitted ? 'BALLOT SEALED' : 'SEAL EJECTION BALLOT'} <span>→</span></button>{canResolve && <button className="seal-ballot secondary" disabled={txBusy} onClick={resolveVote}>REVEAL CREW VERDICT</button>}</div></dialog>}{playerEjected && summary.phase < 4 && <div className="observer-console"><span>CREW STATUS / EJECTED</span><h2>You are off the ship.</h2><p>No power. No role ability. No vote. Watch the crew finish the operation.</p>{canResolve && summary.phase === 1 && <button onClick={resolveRound}>WATCH CREW ORDERS <b>RESOLVE ↗</b></button>}{canResolve && summary.phase === 3 && <button onClick={resolveVote}>WATCH VOTE RESULT <b>REVEAL ↗</b></button>}</div>}{summary.phase === 4 && <div className="observer-console blackbox-card"><span>RECOVERY COMPLETE</span><h2>BLACK BOX</h2><p>Every hidden role, order, ballot, and lie is ready for declassification.</p><button disabled={txBusy} onClick={revealBlackBox}>{tx.stage === 'pending' ? 'RECOVERING' : 'RECOVER FLIGHT RECORD'} <b>DECLASSIFY ↗</b></button></div>}</div></main><aside className="intel-column"><div className="section-code"><span>PRIVATE INTEL</span><b>OWNER ONLY</b></div><div className="intel-feed-v2">{role ? <article className={`intel-report ${role === 'SABOTEUR' ? 'hostile' : 'role'}`}><header><span>01</span><b>{role}</b></header><p>{objectiveLabel(objectiveCode ?? 0)}</p></article> : <div className="empty-feed">PERSONNEL FILE SEALED</div>}</div><div className="section-code public"><span>SHIP FEED</span><b>PUBLIC</b></div><div className="ship-feed-v2">{SYSTEM_NAMES.map((name, index) => <div key={name}><span>0{index + 1}</span><p>{name} / {revealIssue ? '--' : `${vesselHealth[index]}%`}</p></div>)}{publicRound?.ejected !== undefined && <div><span>05</span><p>{publicRound.ejected === 255 ? 'NO EJECTION' : `SEAT ${publicRound.ejected + 1} EJECTED`}</p></div>}</div></aside></div></section></div>;
 }

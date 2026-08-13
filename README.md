@@ -119,6 +119,11 @@ Then open the local Next.js URL and choose **TRAINING SIMULATION**. This route i
 
 ## Deploy the real confidential contract
 
+Current Base Sepolia deployment:
+
+- Contract: `0x4A13c85BEC1B460f0DFCDD12074c55E034522eA0`
+- Explorer: [BaseScan](https://sepolia.basescan.org/address/0x4A13c85BEC1B460f0DFCDD12074c55E034522eA0)
+
 1. Use a dedicated Base Sepolia test wallet. Do not put a mainnet private key in this project.
 2. Fund it with Base Sepolia test ETH.
 3. Configure the contract environment:

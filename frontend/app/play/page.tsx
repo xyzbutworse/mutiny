@@ -4,10 +4,12 @@ import { SimulationGame } from "@/components/SimulationGame";
 export default function PlayPage() {
   return (
     <HullFrame active="play">
-      <div className="training-mode-banner">
-        TRAINING SIMULATION · LOCAL CREW LOGIC · NO LIVE WALLETS OR BASE SEPOLIA ACTIONS
+      <div className="play-console">
+        <div className="training-mode-banner">
+          TRAINING MODE · LOCAL CREW · NO LIVE TRANSACTIONS
+        </div>
+        <SimulationGame />
       </div>
-      <SimulationGame />
     </HullFrame>
   );
 }
