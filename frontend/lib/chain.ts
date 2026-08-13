@@ -27,21 +27,27 @@ export const publicClient = createPublicClient({
   transport: http(BASE_SEPOLIA_RPC),
 });
 
-function injectedProvider() {
+type WalletEvent = 'accountsChanged' | 'chainChanged' | 'connect' | 'disconnect';
+
+export type ConnectedProvider = EIP1193Provider & {
+  on?: (event: WalletEvent, listener: (...args: unknown[]) => void) => void;
+  removeListener?: (event: WalletEvent, listener: (...args: unknown[]) => void) => void;
+};
+
+function injectedProvider(): ConnectedProvider {
   if (typeof window === 'undefined' || !window.ethereum) {
     throw new Error('NO_INJECTED_WALLET');
   }
   return window.ethereum;
 }
 
-export async function walletChainId() {
-  const value = await injectedProvider().request({ method: 'eth_chainId' });
+export async function walletChainId(provider: EIP1193Provider = injectedProvider()) {
+  const value = await provider.request({ method: 'eth_chainId' });
   if (typeof value !== 'string') throw new Error('Wallet returned an invalid network.');
   return Number.parseInt(value, 16);
 }
 
-export async function switchToBaseSepolia() {
-  const provider = injectedProvider();
+export async function switchToBaseSepolia(provider: EIP1193Provider = injectedProvider()) {
   try {
     await provider.request({
       method: 'wallet_switchEthereumChain',
@@ -63,11 +69,11 @@ export async function switchToBaseSepolia() {
       ],
     });
   }
-  return walletChainId();
+  return walletChainId(provider);
 }
 
-async function walletConnection(requestAccounts: boolean) {
-  const provider: EIP1193Provider = injectedProvider();
+async function walletConnection(requestAccounts: boolean, boundProvider?: ConnectedProvider) {
+  const provider = boundProvider ?? injectedProvider();
   const method = requestAccounts ? 'eth_requestAccounts' : 'eth_accounts';
   const result = await provider.request({ method });
   const accounts = Array.isArray(result) ? result : [];
@@ -81,7 +87,7 @@ async function walletConnection(requestAccounts: boolean) {
     account: account as Address,
     transport: custom(provider),
   });
-  return { wallet, account: account as Address, chainId: await walletChainId(), provider };
+  return { wallet, account: account as Address, chainId: await walletChainId(provider), provider };
 }
 
 export function connectWallet() {
@@ -91,17 +97,17 @@ export function connectWallet() {
   });
 }
 
-export function restoreWallet() {
-  return walletConnection(false);
+export function restoreWallet(provider?: ConnectedProvider) {
+  return walletConnection(false, provider);
 }
 
-export async function sendWalletTransaction(request: {
+export async function sendWalletTransaction(provider: EIP1193Provider, request: {
   account: Address;
   to: Address;
   data: Hex;
   value: bigint;
 }) {
-  const result = await injectedProvider().request({
+  const result = await provider.request({
     method: 'eth_sendTransaction',
     params: [
       {

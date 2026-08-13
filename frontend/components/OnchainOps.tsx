@@ -20,6 +20,7 @@ import {
   revealPublic,
   sendWalletTransaction,
   switchToBaseSepolia,
+  type ConnectedProvider,
   type ConnectedWallet,
 } from '@/lib/chain';
 import {
@@ -121,6 +122,7 @@ export function OnchainOps() {
   const { play, setAmbience } = useGameAudio();
   const configured = MUTINY_ADDRESS.toLowerCase() !== ZERO_ADDRESS;
   const [wallet, setWallet] = useState<ConnectedWallet | null>(null);
+  const [walletProvider, setWalletProvider] = useState<ConnectedProvider | null>(null);
   const [account, setAccount] = useState<Address | null>(null);
   const [chainId, setChainId] = useState<number | null>(null);
   const [matchCode, setMatchCode] = useState('');
@@ -337,19 +339,21 @@ export function OnchainOps() {
     void restoreWallet().then((connection) => {
       if (!connection) return;
       setWallet(connection.wallet);
+      setWalletProvider(connection.provider);
       setAccount(connection.account);
       setChainId(connection.chainId);
     }).catch(() => undefined);
   }, []);
 
   useEffect(() => {
-    const provider = window.ethereum;
+    const provider = walletProvider;
     if (!provider?.on) return;
     const recoverProviderIdentity = async () => {
       if (readLocalValue('mutiny:wallet-disconnected') === 'true') return false;
-      const connection = await restoreWallet();
+      const connection = await restoreWallet(provider);
       if (!connection) return false;
       setWallet(connection.wallet);
+      setWalletProvider(connection.provider);
       setAccount(connection.account);
       setChainId(connection.chainId);
       setError('');
@@ -361,9 +365,9 @@ export function OnchainOps() {
       if (typeof next !== 'string') {
         void recoverProviderIdentity().then((recovered) => {
           if (recovered) return;
-          setWallet(null); setAccount(null); setSeat(null); clearPrivateState(); setError('Crew identity lost. The operation code remains stored for reconnection.');
+          setWallet(null); setWalletProvider(null); setAccount(null); setSeat(null); clearPrivateState(); setError('Crew identity lost. The operation code remains stored for reconnection.');
         }).catch(() => {
-          setWallet(null); setAccount(null); setSeat(null); clearPrivateState(); setError('Crew identity lost. The operation code remains stored for reconnection.');
+          setWallet(null); setWalletProvider(null); setAccount(null); setSeat(null); clearPrivateState(); setError('Crew identity lost. The operation code remains stored for reconnection.');
         });
       } else {
         if (readLocalValue('mutiny:wallet-disconnected') === 'true') return;
@@ -399,7 +403,7 @@ export function OnchainOps() {
       provider.removeListener?.('connect', connected);
       provider.removeListener?.('disconnect', disconnected);
     };
-  }, [clearPrivateState]);
+  }, [clearPrivateState, walletProvider]);
 
   useEffect(() => {
     if (!matchCode) { setSummary(null); return; }
@@ -432,7 +436,7 @@ export function OnchainOps() {
       play('relay');
       const connection = await connectWallet();
       removeLocalValue('mutiny:wallet-disconnected');
-      setWallet(connection.wallet); setAccount(connection.account); setChainId(connection.chainId);
+      setWallet(connection.wallet); setWalletProvider(connection.provider); setAccount(connection.account); setChainId(connection.chainId);
       setError(''); setNotice('Crew identity confirmed.');
       setTx({ stage: 'confirmed', label: 'Crew identity confirmed' });
       if (matchCode) await syncMatch({ code: matchCode });
@@ -444,7 +448,7 @@ export function OnchainOps() {
     operationLock.current = true;
     try {
       writeLocalValue('mutiny:wallet-disconnected', 'true');
-      const provider = window.ethereum;
+      const provider = walletProvider ?? window.ethereum;
       if (provider) {
         try {
           await provider.request({
@@ -456,6 +460,7 @@ export function OnchainOps() {
         }
       }
       setWallet(null);
+      setWalletProvider(null);
       setAccount(null);
       setChainId(null);
       setSeat(null);
@@ -473,13 +478,14 @@ export function OnchainOps() {
     await perform(async () => {
       setError(''); setTx({ stage: 'wallet', label: 'Requesting Base Sepolia' });
       play('relay');
-      setChainId(await switchToBaseSepolia());
+      if (!walletProvider) throw new Error('Wallet disconnected');
+      setChainId(await switchToBaseSepolia(walletProvider));
       setTx({ stage: 'confirmed', label: 'Base Sepolia signal locked' });
     }, 'Network change cancelled');
   }
 
   async function send(command: Command, label: string): Promise<TransactionReceipt> {
-    if (!wallet || !account) throw new Error('Wallet disconnected');
+    if (!wallet || !walletProvider || !account) throw new Error('Wallet disconnected');
     if (!onBase) throw new Error('Wrong network');
     const value = 'value' in command ? command.value : 0n;
     setError(''); setNotice(''); setTx({ stage: 'wallet', label: `Authorize ${label}` });
@@ -498,7 +504,7 @@ export function OnchainOps() {
     }
     let hash: Hex;
     try {
-      hash = await sendWalletTransaction({
+      hash = await sendWalletTransaction(walletProvider, {
         account,
         to: MUTINY_ADDRESS,
         data,

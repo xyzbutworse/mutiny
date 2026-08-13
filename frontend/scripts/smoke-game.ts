@@ -9,7 +9,7 @@ import {
 } from "../lib/game";
 import { operationErrorMessage } from "../lib/onchain-errors";
 import { parseTrainingSession } from "../lib/training-session";
-import { BASE_SEPOLIA_CHAIN_ID, connectWallet, switchToBaseSepolia } from "../lib/chain";
+import { BASE_SEPOLIA_CHAIN_ID, connectWallet, sendWalletTransaction, switchToBaseSepolia } from "../lib/chain";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -134,6 +134,7 @@ Object.defineProperty(globalThis, "window", {
           return null;
         }
         if (method === "eth_chainId") return `0x${activeChain.toString(16)}`;
+        if (method === "eth_sendTransaction") return `0x${"1".repeat(64)}`;
         return null;
       },
     },
@@ -141,13 +142,34 @@ Object.defineProperty(globalThis, "window", {
 });
 const wrongNetwork = await connectWallet();
 assert(wrongNetwork.chainId === 1, "wrong-chain wallet state was not detected");
-assert(await switchToBaseSepolia() === BASE_SEPOLIA_CHAIN_ID, "Base Sepolia switch did not complete");
+assert(await switchToBaseSepolia(wrongNetwork.provider) === BASE_SEPOLIA_CHAIN_ID, "Base Sepolia switch did not complete");
 assert(walletRequests.includes("wallet_switchEthereumChain"), "wallet network switch was not requested");
+let decoyProviderUsed = false;
+Object.defineProperty(globalThis, "window", {
+  configurable: true,
+  value: {
+    ethereum: {
+      request: async () => {
+        decoyProviderUsed = true;
+        throw new Error("wrong provider selected");
+      },
+    },
+  },
+});
+const hash = await sendWalletTransaction(wrongNetwork.provider, {
+  account: wrongNetwork.account,
+  to: wrongNetwork.account,
+  data: "0x",
+  value: 0n,
+});
+assert(hash === `0x${"1".repeat(64)}`, "bound provider did not return its transaction hash");
+assert(walletRequests.includes("eth_sendTransaction"), "bound provider did not receive the transaction");
+assert(!decoyProviderUsed, "transaction leaked to a different injected wallet provider");
 Object.defineProperty(globalThis, "window", { configurable: true, value: undefined });
 }
 
 void verifyWalletRecovery().then(() => {
-  console.log("MUTINY smoke: 50/50 matches, 500/500 codecs, 11/11 failure states, wallet rejection, chain switching, and refresh recovery valid.");
+  console.log("MUTINY smoke: 50/50 matches, 500/500 codecs, 11/11 failure states, wallet rejection, chain switching, provider binding, and refresh recovery valid.");
 }).catch((error) => {
   console.error(error);
   process.exitCode = 1;
