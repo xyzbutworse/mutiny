@@ -67,6 +67,7 @@ assert(ejectedPlayerState.records[0].votes?.[ejectedPlayerState.playerSeat] === 
 const errorCases: Array<[unknown, string]> = [
   [{ code: 4001 }, "Wallet hatch closed"],
   [new Error("insufficient funds"), "Fuel reserve empty"],
+  [new Error("NO_INJECTED_WALLET"), "No wallet detected"],
   [new Error("Wallet disconnected"), "Crew identity lost"],
   [new Error("Wrong network"), "Wrong signal band"],
   [new Error("MATCH_FULL"), "Manifest sealed"],

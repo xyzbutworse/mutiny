@@ -21,7 +21,10 @@ export function operationErrorMessage(error: unknown) {
   if (/insufficient funds|exceeds balance|insufficient base sepolia eth/i.test(message)) {
     return "Fuel reserve empty. Add Base Sepolia test ETH, then retry the transmission.";
   }
-  if (/wallet disconnected|no wallet account|no account|ethereum wallet/i.test(message)) {
+  if (/NO_INJECTED_WALLET|install or open an ethereum wallet/i.test(message)) {
+    return "No wallet detected. Open MUTINY in MetaMask, Coinbase Wallet, or a browser with a wallet extension.";
+  }
+  if (/wallet disconnected|no wallet account|no account/i.test(message)) {
     return "Crew identity lost. Reconnect the same wallet to resume this operation.";
   }
   if (/wrong network|wallet returned an invalid network|chain mismatch/i.test(message)) {

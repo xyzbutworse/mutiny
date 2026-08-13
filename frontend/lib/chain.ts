@@ -27,7 +27,7 @@ export const publicClient = createPublicClient({
 
 function injectedProvider() {
   if (typeof window === 'undefined' || !window.ethereum) {
-    throw new Error('Install or open an Ethereum wallet to continue.');
+    throw new Error('NO_INJECTED_WALLET');
   }
   return window.ethereum;
 }
