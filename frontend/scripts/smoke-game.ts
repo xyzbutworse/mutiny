@@ -84,7 +84,6 @@ for (const [error, expected] of errorCases) {
   assert(operationErrorMessage(error).includes(expected), `wrong recovery copy for ${String(error)}`);
 }
 assert(/relay code [0-9A-F]{8}/.test(operationErrorMessage(new Error("unclassified provider failure"))), "unknown wallet failure has no diagnostic code");
-assert(operationErrorMessage(new Error("TRANSACTION_PREFLIGHT_FAILED")).includes("preflight failed"), "preflight failure lost its stage");
 assert(operationErrorMessage(new Error("WALLET_SUBMISSION_FAILED")).includes("wallet failed"), "wallet submission failure lost its stage");
 
 const resumable = startSimulation();

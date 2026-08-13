@@ -57,9 +57,6 @@ export function operationErrorMessage(error: unknown) {
   if (/intrinsic gas too low|gas required exceeds allowance|out of gas/i.test(message)) {
     return "Transaction fuel estimate failed. Refresh the bridge state, then retry once.";
   }
-  if (/TRANSACTION_PREFLIGHT_FAILED/i.test(message)) {
-    return `Base Sepolia preflight failed before the wallet opened. Report relay code ${diagnosticCode(message)}.`;
-  }
   if (/WALLET_SUBMISSION_FAILED/i.test(message)) {
     return `The wallet failed before broadcasting the transaction. Report relay code ${diagnosticCode(message)}.`;
   }
