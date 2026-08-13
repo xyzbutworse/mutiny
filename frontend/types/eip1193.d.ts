@@ -1,6 +1,6 @@
 import type { EIP1193Provider } from 'viem';
 
-type WalletEvent = 'accountsChanged' | 'chainChanged' | 'disconnect';
+type WalletEvent = 'accountsChanged' | 'chainChanged' | 'connect' | 'disconnect';
 
 declare global {
   interface Window {

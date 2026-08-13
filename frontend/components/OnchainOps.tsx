@@ -375,20 +375,27 @@ export function OnchainOps() {
       const value = args[0];
       setChainId(typeof value === 'string' ? Number.parseInt(value, 16) : null);
     };
+    const connected = (...args: unknown[]) => {
+      const detail = args[0];
+      const value = typeof detail === 'object' && detail && 'chainId' in detail ? detail.chainId : null;
+      if (typeof value === 'string') setChainId(Number.parseInt(value, 16));
+      setError('');
+      setNotice('Crew identity confirmed.');
+    };
     const disconnected = () => {
-      void recoverProviderIdentity().then((recovered) => {
-        if (recovered) return;
-        setWallet(null); setAccount(null); setSeat(null); clearPrivateState(); setError('Crew identity lost. Reconnect the same wallet to resume this operation.');
-      }).catch(() => {
-        setWallet(null); setAccount(null); setSeat(null); clearPrivateState(); setError('Crew identity lost. Reconnect the same wallet to resume this operation.');
-      });
+      if (readLocalValue('mutiny:wallet-disconnected') === 'true') return;
+      setChainId(null);
+      setError('');
+      setNotice('Wallet signal interrupted. Your crew identity and operation remain secured while the relay reconnects.');
     };
     provider.on('accountsChanged', accountsChanged);
     provider.on('chainChanged', chainChanged);
+    provider.on('connect', connected);
     provider.on('disconnect', disconnected);
     return () => {
       provider.removeListener?.('accountsChanged', accountsChanged);
       provider.removeListener?.('chainChanged', chainChanged);
+      provider.removeListener?.('connect', connected);
       provider.removeListener?.('disconnect', disconnected);
     };
   }, [clearPrivateState]);
@@ -435,6 +442,7 @@ export function OnchainOps() {
     if (txBusy) return;
     operationLock.current = true;
     try {
+      writeLocalValue('mutiny:wallet-disconnected', 'true');
       const provider = window.ethereum;
       if (provider) {
         try {
@@ -446,7 +454,6 @@ export function OnchainOps() {
           // Some injected wallets do not support programmatic permission revocation.
         }
       }
-      writeLocalValue('mutiny:wallet-disconnected', 'true');
       setWallet(null);
       setAccount(null);
       setChainId(null);
