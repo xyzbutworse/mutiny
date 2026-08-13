@@ -344,16 +344,30 @@ export function OnchainOps() {
   useEffect(() => {
     const provider = window.ethereum;
     if (!provider?.on) return;
+    const recoverProviderIdentity = async () => {
+      if (readLocalValue('mutiny:wallet-disconnected') === 'true') return false;
+      const connection = await restoreWallet();
+      if (!connection) return false;
+      setWallet(connection.wallet);
+      setAccount(connection.account);
+      setChainId(connection.chainId);
+      setError('');
+      return true;
+    };
     const accountsChanged = (...args: unknown[]) => {
       const accounts = Array.isArray(args[0]) ? args[0] : [];
       const next = accounts[0];
       if (typeof next !== 'string') {
-        setWallet(null); setAccount(null); setSeat(null); clearPrivateState(); setError('Crew identity lost. The operation code remains stored for reconnection.');
+        void recoverProviderIdentity().then((recovered) => {
+          if (recovered) return;
+          setWallet(null); setAccount(null); setSeat(null); clearPrivateState(); setError('Crew identity lost. The operation code remains stored for reconnection.');
+        }).catch(() => {
+          setWallet(null); setAccount(null); setSeat(null); clearPrivateState(); setError('Crew identity lost. The operation code remains stored for reconnection.');
+        });
       } else {
         if (readLocalValue('mutiny:wallet-disconnected') === 'true') return;
-        void restoreWallet().then((connection) => {
-          if (!connection) return;
-          setWallet(connection.wallet); setAccount(connection.account); setChainId(connection.chainId); clearPrivateState();
+        void recoverProviderIdentity().then((recovered) => {
+          if (recovered) clearPrivateState();
         }).catch((restoreError) => setError(operationErrorMessage(restoreError)));
       }
     };
@@ -361,7 +375,14 @@ export function OnchainOps() {
       const value = args[0];
       setChainId(typeof value === 'string' ? Number.parseInt(value, 16) : null);
     };
-    const disconnected = () => { setWallet(null); setAccount(null); setSeat(null); clearPrivateState(); setError('Crew identity lost. Reconnect the same wallet to resume this operation.'); };
+    const disconnected = () => {
+      void recoverProviderIdentity().then((recovered) => {
+        if (recovered) return;
+        setWallet(null); setAccount(null); setSeat(null); clearPrivateState(); setError('Crew identity lost. Reconnect the same wallet to resume this operation.');
+      }).catch(() => {
+        setWallet(null); setAccount(null); setSeat(null); clearPrivateState(); setError('Crew identity lost. Reconnect the same wallet to resume this operation.');
+      });
+    };
     provider.on('accountsChanged', accountsChanged);
     provider.on('chainChanged', chainChanged);
     provider.on('disconnect', disconnected);
@@ -404,6 +425,7 @@ export function OnchainOps() {
       const connection = await connectWallet();
       removeLocalValue('mutiny:wallet-disconnected');
       setWallet(connection.wallet); setAccount(connection.account); setChainId(connection.chainId);
+      setError(''); setNotice('Crew identity confirmed.');
       setTx({ stage: 'confirmed', label: 'Crew identity confirmed' });
       if (matchCode) await syncMatch({ code: matchCode });
     }, 'Crew identification paused');
