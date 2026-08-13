@@ -10,6 +10,7 @@ import { useGameAudio } from '@/components/GameAudio';
 import {
   BASE_SEPOLIA_CHAIN_ID,
   MUTINY_ADDRESS,
+  RESOLUTION_GAS_LIMIT,
   connectWallet,
   decryptPrivate,
   encryptUint,
@@ -509,6 +510,9 @@ export function OnchainOps() {
         to: MUTINY_ADDRESS,
         data,
         value,
+        gas: command.name === 'resolveRound' || command.name === 'resolveVote'
+          ? RESOLUTION_GAS_LIMIT
+          : undefined,
       });
     } catch (walletError) {
       throw new Error('WALLET_SUBMISSION_FAILED', { cause: walletError });

@@ -34,6 +34,7 @@ export const BASE_SEPOLIA_RPC =
   process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL || 'https://sepolia.base.org';
 export const BASE_SEPOLIA = baseSepolia;
 export const BASE_SEPOLIA_CHAIN_ID = baseSepolia.id;
+export const RESOLUTION_GAS_LIMIT = 24_000_000n;
 export const INCO_EXECUTOR_ADDRESS =
   '0x4b9911b0191B0b6a6eA8F2Ed562e20Cff5AC8624';
 
@@ -121,6 +122,7 @@ export async function sendWalletTransaction(provider: EIP1193Provider, request: 
   to: Address;
   data: Hex;
   value: bigint;
+  gas?: bigint;
 }) {
   const result = await provider.request({
     method: 'eth_sendTransaction',
@@ -130,6 +132,7 @@ export async function sendWalletTransaction(provider: EIP1193Provider, request: 
         to: request.to,
         data: request.data,
         value: numberToHex(request.value),
+        ...(request.gas === undefined ? {} : { gas: numberToHex(request.gas) }),
       },
     ],
   });

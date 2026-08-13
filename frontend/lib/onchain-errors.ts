@@ -54,6 +54,9 @@ export function operationErrorMessage(error: unknown) {
   if (/nonce too low|nonce has already been used|replacement transaction underpriced/i.test(message)) {
     return "Wallet sequence is stale. Reset the pending account activity or wait for the earlier transmission.";
   }
+  if (/gas limit too high|exceeds maximum per-transaction gas limit/i.test(message)) {
+    return "Resolver fuel exceeded Base limits. Refresh MUTINY to load the bounded transaction profile.";
+  }
   if (/intrinsic gas too low|gas required exceeds allowance|out of gas/i.test(message)) {
     return "Transaction fuel estimate failed. Refresh the bridge state, then retry once.";
   }

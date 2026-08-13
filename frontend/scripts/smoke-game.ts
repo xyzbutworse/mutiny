@@ -9,7 +9,7 @@ import {
 } from "../lib/game";
 import { operationErrorMessage } from "../lib/onchain-errors";
 import { parseTrainingSession } from "../lib/training-session";
-import { BASE_SEPOLIA_CHAIN_ID, connectWallet, contractAddress, sendWalletTransaction, switchToBaseSepolia } from "../lib/chain";
+import { BASE_SEPOLIA_CHAIN_ID, RESOLUTION_GAS_LIMIT, connectWallet, contractAddress, sendWalletTransaction, switchToBaseSepolia } from "../lib/chain";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -136,11 +136,12 @@ assert(rejected, "wallet rejection did not reach the fiction-native recovery sta
 
 let activeChain = 1;
 const walletRequests: string[] = [];
+const submittedTransactions: Array<Record<string, string>> = [];
 Object.defineProperty(globalThis, "window", {
   configurable: true,
   value: {
     ethereum: {
-      request: async ({ method }: { method: string }) => {
+      request: async ({ method, params }: { method: string; params?: unknown[] }) => {
         walletRequests.push(method);
         if (method === "eth_requestAccounts" || method === "eth_accounts") return ["0x0000000000000000000000000000000000000001"];
         if (method === "wallet_switchEthereumChain") {
@@ -148,7 +149,18 @@ Object.defineProperty(globalThis, "window", {
           return null;
         }
         if (method === "eth_chainId") return `0x${activeChain.toString(16)}`;
-        if (method === "eth_sendTransaction") return `0x${"1".repeat(64)}`;
+        if (method === "eth_sendTransaction") {
+          const transactions = Array.isArray(params) ? params : [];
+          const transaction = transactions[0];
+          if (typeof transaction === "object" && transaction !== null) {
+            submittedTransactions.push(Object.fromEntries(
+              Object.entries(transaction).filter(
+                (entry): entry is [string, string] => typeof entry[1] === "string",
+              ),
+            ));
+          }
+          return `0x${"1".repeat(64)}`;
+        }
         return null;
       },
     },
@@ -175,10 +187,12 @@ const hash = await sendWalletTransaction(wrongNetwork.provider, {
   to: wrongNetwork.account,
   data: "0x",
   value: 0n,
+  gas: RESOLUTION_GAS_LIMIT,
 });
 assert(hash === `0x${"1".repeat(64)}`, "bound provider did not return its transaction hash");
 assert(walletRequests.includes("eth_sendTransaction"), "bound provider did not receive the transaction");
 assert(!decoyProviderUsed, "transaction leaked to a different injected wallet provider");
+assert(submittedTransactions[0]?.gas === "0x16e3600", "resolver gas limit was not serialized as a hex quantity");
 Object.defineProperty(globalThis, "window", { configurable: true, value: undefined });
 }
 

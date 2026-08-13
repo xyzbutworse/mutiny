@@ -6391,7 +6391,34 @@ a {
 .onchain-console .order-options button:nth-child(n) { min-height: 58px; grid-template-columns: 24px 1fr; grid-template-rows: auto auto; gap: 3px 7px; padding: 7px; }
 .onchain-console .order-options button small { grid-column: 2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .onchain-console .seal-lever { height: 58px; min-height: 58px; margin-top: 5px; }
-.onchain-console .onchain-resolve { position: absolute; right: 22px; bottom: 22px; z-index: 2; background: #12130f; }
+.onchain-console .onchain-resolve {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 2;
+  border: 2px solid #f1d9ac;
+  background: #a64b37;
+  color: #fff4dc;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  box-shadow: inset 0 0 0 1px rgba(255, 244, 220, .18), 0 3px 0 #1a100d;
+}
+.onchain-console .onchain-resolve:hover:not(:disabled),
+.onchain-console .onchain-resolve:focus-visible {
+  border-color: #fff4dc;
+  background: #c66548;
+  color: #fff4dc;
+  box-shadow: inset 0 0 0 2px rgba(255, 244, 220, .22), 0 3px 0 #1a100d;
+}
+.onchain-console .seal-lever:has(+ .onchain-resolve) {
+  height: 50px;
+  min-height: 50px;
+}
 .onchain-console .intel-column { display: grid; grid-template-rows: 28px minmax(0, .42fr) 28px minmax(0, .58fr); }
 .onchain-console .intel-feed-v2,
 .onchain-console .ship-feed-v2 { max-height: none; min-height: 0; }
