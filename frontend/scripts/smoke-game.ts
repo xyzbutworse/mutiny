@@ -9,11 +9,25 @@ import {
 } from "../lib/game";
 import { operationErrorMessage } from "../lib/onchain-errors";
 import { parseTrainingSession } from "../lib/training-session";
-import { BASE_SEPOLIA_CHAIN_ID, connectWallet, sendWalletTransaction, switchToBaseSepolia } from "../lib/chain";
+import { BASE_SEPOLIA_CHAIN_ID, connectWallet, contractAddress, sendWalletTransaction, switchToBaseSepolia } from "../lib/chain";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
+
+assert(
+  contractAddress("0x4A13c85BEC1B460f0DFCDD12074c55E034522eA0") ===
+    "0x4A13c85BEC1B460f0DFCDD12074c55E034522eA0",
+  "valid contract address was rejected",
+);
+let invalidContractAddressRejected = false;
+try {
+  contractAddress("https://mutiny-one.vercel.app");
+} catch (error) {
+  invalidContractAddressRejected =
+    error instanceof Error && error.message.includes("NEXT_PUBLIC_MUTINY_ADDRESS");
+}
+assert(invalidContractAddressRejected, "site URL was accepted as a contract address");
 
 const observedRoles = new Set<string>();
 

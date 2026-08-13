@@ -4,6 +4,7 @@ import {
   createPublicClient,
   createWalletClient,
   custom,
+  getAddress,
   http,
   isHex,
   numberToHex,
@@ -13,8 +14,22 @@ import {
 } from 'viem';
 import { baseSepolia } from 'viem/chains';
 
-export const MUTINY_ADDRESS = (process.env.NEXT_PUBLIC_MUTINY_ADDRESS ||
-  '0x0000000000000000000000000000000000000000') as Address;
+const ZERO_ADDRESS: Address = '0x0000000000000000000000000000000000000000';
+
+export function contractAddress(value: string | undefined): Address {
+  if (!value) return ZERO_ADDRESS;
+  try {
+    return getAddress(value);
+  } catch {
+    throw new Error(
+      'NEXT_PUBLIC_MUTINY_ADDRESS must be a 0x-prefixed 20-byte contract address.',
+    );
+  }
+}
+
+export const MUTINY_ADDRESS = contractAddress(
+  process.env.NEXT_PUBLIC_MUTINY_ADDRESS,
+);
 export const BASE_SEPOLIA_RPC =
   process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL || 'https://sepolia.base.org';
 export const BASE_SEPOLIA = baseSepolia;
