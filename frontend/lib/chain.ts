@@ -157,25 +157,14 @@ export function bufferedResolutionGas(estimate: bigint) {
   return buffered;
 }
 
-export async function estimateWalletTransactionGas(
-  provider: EIP1193Provider,
-  request: WalletTransactionRequest,
-) {
-  const result = await provider.request({
-    method: 'eth_estimateGas',
-    params: [
-      {
-        from: request.account,
-        to: request.to,
-        data: request.data,
-        value: numberToHex(request.value),
-      },
-    ],
+export async function estimateResolutionGas(request: WalletTransactionRequest) {
+  const estimate = await publicClient.estimateGas({
+    account: request.account,
+    to: request.to,
+    data: request.data,
+    value: request.value,
   });
-  if (typeof result !== 'string' || !isHex(result)) {
-    throw new Error('Wallet returned an invalid gas estimate.');
-  }
-  return bufferedResolutionGas(BigInt(result));
+  return bufferedResolutionGas(estimate);
 }
 
 export async function getZap() {

@@ -13,7 +13,7 @@ import {
   connectWallet,
   decryptPrivate,
   encryptUint,
-  estimateWalletTransactionGas,
+  estimateResolutionGas,
   getIncoFee,
   mutinyAbi,
   publicClient,
@@ -514,7 +514,7 @@ export function OnchainOps() {
     if (isResolution) {
       setTx({ stage: 'wallet', label: `Calculating ${label} fuel` });
       try {
-        gas = await estimateWalletTransactionGas(walletProvider, transactionRequest);
+        gas = await estimateResolutionGas(transactionRequest);
       } catch (estimateError) {
         throw new Error('RESOLUTION_GAS_ESTIMATE_FAILED', { cause: estimateError });
       }

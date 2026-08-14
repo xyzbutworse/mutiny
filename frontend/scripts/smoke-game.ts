@@ -9,7 +9,7 @@ import {
 } from "../lib/game";
 import { operationErrorMessage } from "../lib/onchain-errors";
 import { parseTrainingSession } from "../lib/training-session";
-import { BASE_SEPOLIA_CHAIN_ID, bufferedResolutionGas, connectWallet, contractAddress, estimateWalletTransactionGas, sendWalletTransaction, switchToBaseSepolia } from "../lib/chain";
+import { BASE_SEPOLIA_CHAIN_ID, bufferedResolutionGas, connectWallet, contractAddress, sendWalletTransaction, switchToBaseSepolia } from "../lib/chain";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -149,7 +149,6 @@ Object.defineProperty(globalThis, "window", {
           return null;
         }
         if (method === "eth_chainId") return `0x${activeChain.toString(16)}`;
-        if (method === "eth_estimateGas") return "0xcb1121";
         if (method === "eth_sendTransaction") {
           const transactions = Array.isArray(params) ? params : [];
           const transaction = transactions[0];
@@ -189,10 +188,11 @@ const transactionRequest = {
   data: "0x",
   value: 0n,
 } as const;
-const estimatedGas = await estimateWalletTransactionGas(wrongNetwork.provider, transactionRequest);
+const estimatedGas = bufferedResolutionGas(13_308_193n);
 const hash = await sendWalletTransaction(wrongNetwork.provider, { ...transactionRequest, gas: estimatedGas });
 assert(hash === `0x${"1".repeat(64)}`, "bound provider did not return its transaction hash");
 assert(walletRequests.includes("eth_sendTransaction"), "bound provider did not receive the transaction");
+assert(!walletRequests.includes("eth_estimateGas"), "injected wallet was asked to estimate resolver gas");
 assert(!decoyProviderUsed, "transaction leaked to a different injected wallet provider");
 assert(estimatedGas === 14_372_849n, "resolver estimate did not receive its eight-percent safety buffer");
 assert(submittedTransactions[0]?.gas === "0xdb4ff1", "buffered resolver gas was not serialized as a hex quantity");
