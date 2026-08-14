@@ -9,7 +9,7 @@ import {
 } from "../lib/game";
 import { operationErrorMessage } from "../lib/onchain-errors";
 import { parseTrainingSession } from "../lib/training-session";
-import { BASE_SEPOLIA_CHAIN_ID, RESOLUTION_GAS_LIMIT, connectWallet, contractAddress, sendWalletTransaction, switchToBaseSepolia } from "../lib/chain";
+import { BASE_SEPOLIA_CHAIN_ID, bufferedResolutionGas, connectWallet, contractAddress, estimateWalletTransactionGas, sendWalletTransaction, switchToBaseSepolia } from "../lib/chain";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -149,6 +149,7 @@ Object.defineProperty(globalThis, "window", {
           return null;
         }
         if (method === "eth_chainId") return `0x${activeChain.toString(16)}`;
+        if (method === "eth_estimateGas") return "0xcb1121";
         if (method === "eth_sendTransaction") {
           const transactions = Array.isArray(params) ? params : [];
           const transaction = transactions[0];
@@ -182,17 +183,26 @@ Object.defineProperty(globalThis, "window", {
     },
   },
 });
-const hash = await sendWalletTransaction(wrongNetwork.provider, {
+const transactionRequest = {
   account: wrongNetwork.account,
   to: wrongNetwork.account,
   data: "0x",
   value: 0n,
-  gas: RESOLUTION_GAS_LIMIT,
-});
+} as const;
+const estimatedGas = await estimateWalletTransactionGas(wrongNetwork.provider, transactionRequest);
+const hash = await sendWalletTransaction(wrongNetwork.provider, { ...transactionRequest, gas: estimatedGas });
 assert(hash === `0x${"1".repeat(64)}`, "bound provider did not return its transaction hash");
 assert(walletRequests.includes("eth_sendTransaction"), "bound provider did not receive the transaction");
 assert(!decoyProviderUsed, "transaction leaked to a different injected wallet provider");
-assert(submittedTransactions[0]?.gas === "0x16e3600", "resolver gas limit was not serialized as a hex quantity");
+assert(estimatedGas === 14_372_849n, "resolver estimate did not receive its eight-percent safety buffer");
+assert(submittedTransactions[0]?.gas === "0xdb4ff1", "buffered resolver gas was not serialized as a hex quantity");
+let oversizedEstimateRejected = false;
+try {
+  bufferedResolutionGas(15_000_000n);
+} catch (error) {
+  oversizedEstimateRejected = error instanceof Error && error.message === "RESOLUTION_GAS_CAP_EXCEEDED";
+}
+assert(oversizedEstimateRejected, "unsafe resolver estimate exceeded the client gas cap");
 Object.defineProperty(globalThis, "window", { configurable: true, value: undefined });
 }
 

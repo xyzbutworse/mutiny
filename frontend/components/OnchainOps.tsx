@@ -10,10 +10,10 @@ import { useGameAudio } from '@/components/GameAudio';
 import {
   BASE_SEPOLIA_CHAIN_ID,
   MUTINY_ADDRESS,
-  RESOLUTION_GAS_LIMIT,
   connectWallet,
   decryptPrivate,
   encryptUint,
+  estimateWalletTransactionGas,
   getIncoFee,
   mutinyAbi,
   publicClient,
@@ -503,16 +503,28 @@ export function OnchainOps() {
       case 'submitVote': data = encodeFunctionData({ abi: mutinyAbi, functionName: 'submitVote', args: [command.matchId, command.payload] }); break;
       case 'resolveVote': data = encodeFunctionData({ abi: mutinyAbi, functionName: 'resolveVote', args: [command.matchId] }); break;
     }
+    const transactionRequest = {
+      account,
+      to: MUTINY_ADDRESS,
+      data,
+      value,
+    };
+    const isResolution = command.name === 'resolveRound' || command.name === 'resolveVote';
+    let gas: bigint | undefined;
+    if (isResolution) {
+      setTx({ stage: 'wallet', label: `Calculating ${label} fuel` });
+      try {
+        gas = await estimateWalletTransactionGas(walletProvider, transactionRequest);
+      } catch (estimateError) {
+        throw new Error('RESOLUTION_GAS_ESTIMATE_FAILED', { cause: estimateError });
+      }
+      setTx({ stage: 'wallet', label: `Authorize ${label}` });
+    }
     let hash: Hex;
     try {
       hash = await sendWalletTransaction(walletProvider, {
-        account,
-        to: MUTINY_ADDRESS,
-        data,
-        value,
-        gas: command.name === 'resolveRound' || command.name === 'resolveVote'
-          ? RESOLUTION_GAS_LIMIT
-          : undefined,
+        ...transactionRequest,
+        gas,
       });
     } catch (walletError) {
       throw new Error('WALLET_SUBMISSION_FAILED', { cause: walletError });

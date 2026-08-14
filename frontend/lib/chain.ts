@@ -34,7 +34,7 @@ export const BASE_SEPOLIA_RPC =
   process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL || 'https://sepolia.base.org';
 export const BASE_SEPOLIA = baseSepolia;
 export const BASE_SEPOLIA_CHAIN_ID = baseSepolia.id;
-export const RESOLUTION_GAS_LIMIT = 24_000_000n;
+export const MAX_RESOLUTION_GAS_LIMIT = 16_000_000n;
 export const INCO_EXECUTOR_ADDRESS =
   '0x4b9911b0191B0b6a6eA8F2Ed562e20Cff5AC8624';
 
@@ -140,6 +140,42 @@ export async function sendWalletTransaction(provider: EIP1193Provider, request: 
     throw new Error('Wallet returned an invalid transaction hash.');
   }
   return result as Hex;
+}
+
+type WalletTransactionRequest = {
+  account: Address;
+  to: Address;
+  data: Hex;
+  value: bigint;
+};
+
+export function bufferedResolutionGas(estimate: bigint) {
+  const buffered = (estimate * 108n + 99n) / 100n;
+  if (buffered > MAX_RESOLUTION_GAS_LIMIT) {
+    throw new Error('RESOLUTION_GAS_CAP_EXCEEDED');
+  }
+  return buffered;
+}
+
+export async function estimateWalletTransactionGas(
+  provider: EIP1193Provider,
+  request: WalletTransactionRequest,
+) {
+  const result = await provider.request({
+    method: 'eth_estimateGas',
+    params: [
+      {
+        from: request.account,
+        to: request.to,
+        data: request.data,
+        value: numberToHex(request.value),
+      },
+    ],
+  });
+  if (typeof result !== 'string' || !isHex(result)) {
+    throw new Error('Wallet returned an invalid gas estimate.');
+  }
+  return bufferedResolutionGas(BigInt(result));
 }
 
 export async function getZap() {

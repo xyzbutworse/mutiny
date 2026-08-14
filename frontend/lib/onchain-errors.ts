@@ -57,6 +57,12 @@ export function operationErrorMessage(error: unknown) {
   if (/gas limit too high|exceeds maximum per-transaction gas limit/i.test(message)) {
     return "Resolver fuel exceeded Base limits. Refresh MUTINY to load the bounded transaction profile.";
   }
+  if (/RESOLUTION_GAS_CAP_EXCEEDED/i.test(message)) {
+    return "Encrypted resolution exceeds the safe Base transaction profile. Preserve this operation and report the round.";
+  }
+  if (/RESOLUTION_GAS_ESTIMATE_FAILED/i.test(message)) {
+    return "Resolver fuel check failed before the wallet opened. Synchronize the bridge, then retry.";
+  }
   if (/intrinsic gas too low|gas required exceeds allowance|out of gas/i.test(message)) {
     return "Transaction fuel estimate failed. Refresh the bridge state, then retry once.";
   }
